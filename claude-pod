@@ -45,8 +45,20 @@ DOCKER_FLAGS=("--rm")
 # Optional Port Mapping:
 #   Allows users to map dev servers by passing PORTS="3000 8080:80".
 #   We force binding to 127.0.0.1 to prevent exposing dev servers to public networks.
+#   Each entry must be either "PORT" or "HOST:CONTAINER", with both parts in the 1-65535 range.
+#   We validate up front so a typo surfaces as a clear error here rather than a cryptic Docker failure.
 if [ -n "${PORTS:-}" ]; then
   for port in $PORTS; do
+    if [[ ! "$port" =~ ^[0-9]+(:[0-9]+)?$ ]]; then
+      die "PORTS entry '$port' is invalid; expected 'PORT' or 'HOST:CONTAINER' (digits only)."
+    fi
+    # Range-check each numeric component. 10# forces base-10 so "08"/"09" don't parse as octal.
+    IFS=':' read -ra _port_parts <<< "$port"
+    for _n in "${_port_parts[@]}"; do
+      if (( 10#$_n < 1 || 10#$_n > 65535 )); then
+        die "PORTS entry '$port' has '$_n' outside the 1-65535 range."
+      fi
+    done
     if [[ "$port" == *":"* ]]; then
       DOCKER_FLAGS+=("-p" "127.0.0.1:${port}")
     else
