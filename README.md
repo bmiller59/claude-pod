@@ -34,7 +34,7 @@ If a platform doesn't behave as expected, please open an issue.
 
 The whole tool is four tiny files:
 
-- **`Dockerfile`** — `node:24-slim` + `git` + `curl` + `less` + `@anthropic-ai/claude-code`.
+- **`Dockerfile`** — `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + `@anthropic-ai/claude-code`.
 - **`claude-pod`** — one `docker run` command that mounts your current directory and nothing else.
 - **`install.sh`** — checks Docker and builds the image. Doesn't touch any system path; the tool stays self-contained in this folder.
 - **`uninstall.sh`** — removes the image and `~/.claude-pod/` (auth + session history) after confirmation. Lists what it doesn't touch so you can clean those up yourself.
@@ -154,11 +154,11 @@ The tradeoff: the worst case becomes "something bad happens to one project folde
 
 ## Customizing
 
-The image is intentionally minimal: `node:24-slim` + `git` + `curl` + `less` + Claude Code. Nothing language-specific. Anything your projects need (Python, build tools, other toolchains) you add yourself — edit the `Dockerfile` and re-run `./install.sh`.
+The image is intentionally minimal: `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + Claude Code. Nothing language-specific. Anything your projects need (Python, build tools, other toolchains) you add yourself — edit the `Dockerfile` and re-run `./install.sh`.
 
 **Exposing Ports**
 
-By default, `claude-pod` isolates the container network to prevent collisions. You can map ports using the `PORTS` environment variable:
+By default, `claude-pod` doesn't publish any ports to the host (outbound traffic is still unrestricted — see [What is and isn't isolated](#what-is-and-isnt-isolated)). Map ports through with the `PORTS` environment variable:
 
 ```sh
 # Map a single port (127.0.0.1:3000 -> container:3000)
