@@ -45,7 +45,7 @@ The first time you start Claude inside the pod, it will print a login URL. Open 
 
 ## Usage
 
-Call the script by full path from any project:
+Call the script by full or relative path from any project:
 
 ```sh
 cd ~/Projects/anything
@@ -58,12 +58,16 @@ You land in a bash shell at the same path your project lives at on the host (e.g
 claude --dangerously-skip-permissions
 ```
 
+Or run the container and claud inside of it in one command:
+
+```sh
+~/tools/claude-pod/claude-pod claude --dangerously-skip-permissions
+```
+
 By default, no container ports are published to the host, so any dev server you start is unreachable from your browser until you opt in. Outbound traffic from the container is **not** restricted — see [What is and isn't isolated](#what-is-and-isnt-isolated) below. To expose a dev server, pass the `PORTS` variable (e.g., `PORTS=3000 claude-pod`). To exit, type `exit`.
 
-> [!NOTE]
 > The wrapper is a transparent passthrough — there is no `claude-pod --help` or `claude-pod --version` of its own. Those flags would just be forwarded to `bash` inside the container. For Claude's own flags use `claude-pod claude --help` / `claude-pod claude --version`.
 
-> [!NOTE]
 > If your project has a host-built `node_modules`, delete it and reinstall inside the container — native binaries don't cross from host OS to container Linux.
 
 <details>
