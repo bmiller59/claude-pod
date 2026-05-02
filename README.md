@@ -58,7 +58,7 @@ You land in a bash shell at the same path your project lives at on the host (e.g
 claude --dangerously-skip-permissions
 ```
 
-Or run the container and claud inside of it in one command:
+Or run the container and claude code inside of it in one command:
 
 ```sh
 ~/tools/claude-pod/claude-pod claude --dangerously-skip-permissions
