@@ -77,6 +77,9 @@ Anything you pass to `claude-pod` is run inside the container instead of bash. S
 ~/tools/claude-pod/claude-pod claude --dangerously-skip-permissions
 ```
 
+> [!NOTE]
+> The wrapper is a transparent passthrough — there is no `claude-pod --help` or `claude-pod --version` of its own. Those flags would just be forwarded to `bash` inside the container. For Claude's own flags use `claude-pod claude --help` / `claude-pod claude --version`.
+
 Pair with aliases for whichever style you prefer:
 
 ```sh
