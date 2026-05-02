@@ -20,7 +20,7 @@ printf '  %sdir:  %s %s %s(auth + session history)%s\n' "$DIM" "$RESET" "$CLAUDE
 echo
 
 info "Will NOT remove"
-printf '  %snode:lts-slim base image (docker rmi node:lts-slim to clear)%s\n' "$DIM" "$RESET"
+printf '  %snode:24-slim base image (docker rmi node:24-slim to clear)%s\n' "$DIM" "$RESET"
 printf '  %sDocker build cache (docker builder prune to clear)%s\n' "$DIM" "$RESET"
 printf '  %sthis repo folder (delete it yourself)%s\n' "$DIM" "$RESET"
 echo

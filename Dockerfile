@@ -1,3 +1,4 @@
+# If you bump this tag, also update the literal in uninstall.sh.
 FROM node:24-slim
 
 # git/curl/less are baseline dev tools; jq and gh are reached for by Claude's built-in workflows
