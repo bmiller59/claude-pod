@@ -1,10 +1,17 @@
 # claude-pod
 
-Unofficial Docker sandbox for Anthropic's Claude Code CLI. Runs [Claude Code](https://github.com/anthropics/claude-code) inside a container so it can only see the project folder you launched it from. Lets you use `--dangerously-skip-permissions` (auto-approve) without putting the rest of your machine at risk.
+> **Unofficial** Docker sandbox for Anthropic's Claude Code CLI. Use `--dangerously-skip-permissions` safely — Claude only sees the project folder you launched from.
 
-> *This project is not affiliated with, endorsed by, or sponsored by Anthropic, PBC. "Claude" and "Claude Code" are trademarks of Anthropic, PBC, used here nominatively to refer to the underlying tool this project wraps. All trademarks are the property of their respective owners.*
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## TL;DR
+<!--
+Demo placeholder. Drop a recording or screenshot in here when you have one, e.g.:
+<p align="center">
+  <img src="assets/install.png" alt="claude-pod install output" width="640">
+</p>
+-->
+
+## Install & run
 
 ```sh
 git clone https://github.com/trekhleb/claude-pod.git ~/tools/claude-pod
@@ -12,13 +19,11 @@ cd ~/tools/claude-pod && ./install.sh
 ~/tools/claude-pod/claude-pod claude --dangerously-skip-permissions
 ```
 
-The install path (`~/tools/claude-pod`) is just a convention — put it wherever. Read on for what's happening, what's safe, and what's still exposed.
+Docker is the only requirement. The install path (`~/tools/claude-pod`) is just a convention — put it wherever.
 
-## Requirements
+## Requirements & platforms
 
 **Just Docker.** Claude Code runs inside the container, not on your host — you do **not** need Node.js, npm, or the `claude` CLI installed on your machine. The host stays untouched apart from one state folder (`~/.claude-pod/`) that exists only to keep your login across container restarts.
-
-### Platforms
 
 The wrapper is portable POSIX bash + Docker. It should work on any host with a recent Docker:
 
@@ -41,17 +46,68 @@ The whole tool is four tiny files:
 
 Read them. They are short on purpose.
 
-## Setup (one time)
+## First launch (login)
+
+The first time you start Claude inside the pod, it will print a login URL. Open it in your host browser, complete the login, paste the verification code back into the container, and you're done. The session persists in `~/.claude-pod/` and survives container restarts — you only do this once per machine.
+
+## Usage
+
+Call the script by full path from any project:
 
 ```sh
-git clone https://github.com/trekhleb/claude-pod.git ~/tools/claude-pod
-cd ~/tools/claude-pod
-./install.sh
+cd ~/Projects/anything
+~/tools/claude-pod/claude-pod
 ```
 
-That builds the `claude-pod` Docker image. Nothing else is installed on your system. Move or rename the folder anytime — only the image tag matters at runtime.
+You land in a bash shell at the same path your project lives at on the host (e.g. `/Users/you/Projects/anything`), with `claude` on `PATH`. Run it however you like:
 
-### Updating or pinning the Claude Code version
+```sh
+claude --dangerously-skip-permissions
+```
+
+By default, no container ports are published to the host, so any dev server you start is unreachable from your browser until you opt in. Outbound traffic from the container is **not** restricted — see [What is and isn't isolated](#what-is-and-isnt-isolated) below. To expose a dev server, pass the `PORTS` variable (e.g., `PORTS=3000 claude-pod`). To exit, type `exit`.
+
+> [!NOTE]
+> The wrapper is a transparent passthrough — there is no `claude-pod --help` or `claude-pod --version` of its own. Those flags would just be forwarded to `bash` inside the container. For Claude's own flags use `claude-pod claude --help` / `claude-pod claude --version`.
+
+> [!NOTE]
+> If your project has a host-built `node_modules`, delete it and reinstall inside the container — native binaries don't cross from host OS to container Linux.
+
+<details>
+<summary><strong>More usage patterns</strong> (aliases, drop straight into Claude, piping)</summary>
+
+### Aliases
+
+```sh
+alias claude-pod=~/tools/claude-pod/claude-pod                                  # shell first
+alias cc='~/tools/claude-pod/claude-pod claude --dangerously-skip-permissions'  # claude directly
+```
+
+The shell-first form is more flexible (run `npm install`, dev server, tests, then `claude`), so it stays the default.
+
+### Skip the shell, go straight into Claude
+
+Anything you pass to `claude-pod` is run inside the container instead of bash. So this drops you directly into Claude in one command, and exits the container when Claude exits:
+
+```sh
+~/tools/claude-pod/claude-pod claude --dangerously-skip-permissions
+```
+
+### Piping data (standard input)
+
+Because `claude-pod` correctly handles TTY detection, you can seamlessly pipe files or command outputs directly into Claude just like a native CLI tool:
+
+```sh
+# Review a git diff (using the alias above)
+git diff | cc -p "Please review these changes for bugs"
+
+# Analyze a log file
+cat crash.log | cc -p "Why did the server crash?"
+```
+
+</details>
+
+## Updating or pinning the Claude Code version
 
 By default, `install.sh` fetches whatever's currently `latest` on npm, bypassing Docker's cache for that step. To update, just re-run:
 
@@ -67,65 +123,6 @@ CLAUDE_CODE_VERSION=2.0.0 ./install.sh
 ```
 
 Pinned versions cache normally across rebuilds. The script prints the resolved version after each build, so you always know what you got.
-
-## First launch (login)
-
-The first time you start Claude inside the pod, it will print a login URL. Open it in your host browser, complete the login, paste the verification code back into the container, and you're done. The session persists in `~/.claude-pod/` and survives container restarts — you only do this once per machine.
-
-## Usage
-
-Call the script by full path from any project:
-
-```sh
-cd ~/Projects/anything
-~/tools/claude-pod/claude-pod
-```
-
-Prefer something shorter? Add an alias to your shell rc file:
-
-```sh
-alias claude-pod=~/tools/claude-pod/claude-pod
-```
-
-You land in a bash shell at the same path your project lives at on the host (e.g. `/Users/you/Projects/anything`), with `claude` on `PATH`. Run it however you like:
-
-```sh
-claude --dangerously-skip-permissions
-```
-
-By default, no container ports are published to the host, so any dev server you start is unreachable from your browser until you opt in. Outbound traffic from the container is **not** restricted — see [What is and isn't isolated](#what-is-and-isnt-isolated) below. To expose a dev server, pass the `PORTS` variable (e.g., `PORTS=3000 claude-pod`). To exit, type `exit`.
-
-### Skip the shell, go straight into Claude
-
-Anything you pass to `claude-pod` is run inside the container instead of bash. So this drops you directly into Claude in one command, and exits the container when Claude exits:
-
-```sh
-~/tools/claude-pod/claude-pod claude --dangerously-skip-permissions
-```
-
-> [!NOTE]
-> The wrapper is a transparent passthrough — there is no `claude-pod --help` or `claude-pod --version` of its own. Those flags would just be forwarded to `bash` inside the container. For Claude's own flags use `claude-pod claude --help` / `claude-pod claude --version`.
-
-Pair with aliases for whichever style you prefer:
-
-```sh
-alias cp=~/tools/claude-pod/claude-pod                                       # shell first
-alias cc='~/tools/claude-pod/claude-pod claude --dangerously-skip-permissions'  # claude directly
-```
-
-The shell-first form is more flexible (run `npm install`, dev server, tests, then `claude`), so it stays the default.
-
-### Piping Data (Standard Input)
-
-Because `claude-pod` correctly handles TTY detection, you can seamlessly pipe files or command outputs directly into Claude just like a native CLI tool:
-
-```sh
-# Review a git diff (using the alias from above)
-git diff | cc -p "Please review these changes for bugs"
-
-# Analyze a log file
-cat crash.log | cc -p "Why did the server crash?"
-```
 
 ## What is and isn't isolated
 
@@ -152,11 +149,12 @@ Everywhere else Claude writes is either in the container's ephemeral filesystem 
 
 The tradeoff: the worst case becomes "something bad happens to one project folder," which is recoverable from git, instead of "my entire home directory is exposed."
 
-## Customizing
+<details>
+<summary><strong>Customizing the image</strong> (Python, Rust, port mapping examples)</summary>
 
 The image is intentionally minimal: `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + Claude Code. Nothing language-specific. Anything your projects need (Python, build tools, other toolchains) you add yourself — edit the `Dockerfile` and re-run `./install.sh`.
 
-**Exposing Ports**
+### Exposing ports
 
 By default, `claude-pod` doesn't publish any ports to the host (outbound traffic is still unrestricted — see [What is and isn't isolated](#what-is-and-isnt-isolated)). Map ports through with the `PORTS` environment variable:
 
@@ -171,7 +169,7 @@ PORTS="3000 5173" claude-pod
 PORTS="8080:80" claude-pod
 ```
 
-**Python**
+### Python
 
 Edit the `apt-get install` line in `Dockerfile`:
 
@@ -179,13 +177,13 @@ Edit the `apt-get install` line in `Dockerfile`:
 ... git ca-certificates curl less python3 python3-pip python3-venv ...
 ```
 
-**Native compilation** (e.g. `bcrypt`, `node-gyp`, Python C extensions)
+### Native compilation (e.g. `bcrypt`, `node-gyp`, Python C extensions)
 
 ```dockerfile
 ... git ca-certificates curl less build-essential ...
 ```
 
-**Other language toolchains** (Go, Rust, Java, etc.)
+### Other language toolchains (Go, Rust, Java, etc.)
 
 Add a separate `RUN` line below the `apt-get` block. Example for Rust:
 
@@ -195,7 +193,10 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --de
 
 After any change, re-run `./install.sh` to rebuild.
 
-## Side effects outside the project folder
+</details>
+
+<details>
+<summary><strong>Side effects outside the project folder</strong></summary>
 
 Everything this repo causes to exist outside the project you launch it from:
 
@@ -207,6 +208,8 @@ Everything this repo causes to exist outside the project you launch it from:
 
 No `sudo`, no writes to `/usr/local/`, `/etc/`, `~/.zshrc`, `~/Library/`, your existing `~/.claude/`, or anywhere else on the host.
 
+</details>
+
 ## Uninstall
 
 ```sh
@@ -216,10 +219,6 @@ No `sudo`, no writes to `/usr/local/`, `/etc/`, `~/.zshrc`, `~/Library/`, your e
 Removes `~/.claude-pod/` and the `claude-pod` image after confirmation. Tells you exactly what it isn't touching (`node:24-slim`, build cache, this repo) and how to clean those up yourself.
 
 If you added a shell alias for convenience (e.g. `alias claude-pod=...` or `alias cc=...` in `~/.zshrc` / `~/.bashrc`), remove that line too — `uninstall.sh` doesn't touch your shell rc files.
-
-## Notes
-
-- If your project has a host-built `node_modules`, delete it and reinstall inside the container — native binaries don't cross from host OS to container Linux.
 
 ## License & trademarks
 
