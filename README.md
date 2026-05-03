@@ -92,6 +92,9 @@ PORTS="3000 5173" claude-pod
 
 # Map a specific host port to a different container port
 PORTS="8080:80" claude-pod
+
+# Or, alternatively, without using aliases
+PORTS="5173:5173" ~/tools/claude-pod
 ```
 
 ### Updating or pinning the Claude Code version
