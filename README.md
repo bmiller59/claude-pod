@@ -1,26 +1,28 @@
 # claude-pod
 
-> Unofficial Docker sandbox for Anthropic's Claude Code CLI. Use `--dangerously-skip-permissions` safely — Claude only sees the project folder you launched from.
+> Docker sandbox for Claude Code CLI. Use `--dangerously-skip-permissions` safely — Claude only sees the project folder you launched from. Unofficial sandbox.
 
 ![claude-pod](assets/cover.jpeg)
 
 ## Install & run
 
 ```sh
-# Clone the repo
+# Clone this repo (once)
 git clone https://github.com/trekhleb/claude-pod.git ~/tools/claude-pod
 
-# Install claude-pod CLI (builds Docker image)
+# Build claude-pod Docker image (once)
 cd ~/tools/claude-pod && ./install.sh
 
-# Open your project folder and launch claude code inside container
-# cd ~/projects/my-work-in-progress-project
+# Navigate to the project you want to build with Claude Code
+# cd ~/projects/awesome-new-project
+
+# Launch Claude Code safely inside claude-pod container in "auto-approval" mode
 ~/tools/claude-pod/claude-pod claude --dangerously-skip-permissions
 ```
 
-Docker is the only requirement. The install path (`~/tools/claude-pod`) is just a convention — put it wherever you want.
+Docker is the only requirement. The install path (`~/tools/claude-pod`) is just an example — put it wherever you want.
 
-**The outcome:** You can run Claude Code in auto-approval mode without exposing your whole machine. `claude-pod` launches Claude inside a Docker container with only your current project folder mounted, so Claude can read and edit that project, but not your home directory, SSH keys, other projects, or host shell. This turns the main risk from “Claude can touch my machine” into “Claude can touch this project folder.” Read more about [what is and isn't isolated](#what-is-and-isnt-isolated).
+**The outcome:** You can run Claude Code in auto-approval mode, skipping the need to approve every single change, without exposing your whole machine. `claude-pod` launches Claude inside a Docker container with only your current project folder mounted, so Claude can read and edit that project, but not your home directory, SSH keys, other projects, or host shell. This turns the main risk from “Claude can touch my machine” into “Claude can touch this project folder.” Read more about [what is and isn't isolated](#what-is-and-isnt-isolated).
 
 Prefer the official approach? See Anthropic's [Claude Code sandboxing documentation](https://code.claude.com/docs/en/sandboxing).
 
