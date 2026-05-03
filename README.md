@@ -172,12 +172,6 @@ The wrapper is portable POSIX bash + Docker. It should work on any host with a r
 
 If a platform doesn't behave as expected, please open an issue.
 
-## Notes
-
-> The wrapper is a transparent passthrough — there is no `claude-pod --help` or `claude-pod --version` of its own. Those flags would just be forwarded to `bash` inside the container. For Claude's own flags use `claude-pod claude --help` / `claude-pod claude --version`.
-
-> If your project has a host-built `node_modules`, delete it and reinstall inside the container — native binaries don't cross from host OS to container Linux.
-
 ## License & trademarks
 
 The code in this repository is released under the MIT License — see [`LICENSE`](LICENSE) for the full text.
