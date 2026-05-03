@@ -4,7 +4,7 @@
 
 ![claude-pod](assets/cover.jpeg)
 
-## Install & run
+## Install & Run
 
 ```sh
 # Clone this repo (once)
