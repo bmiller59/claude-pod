@@ -25,12 +25,17 @@ printf '  %sDocker build cache (docker builder prune to clear)%s\n' "$DIM" "$RES
 printf '  %sthis repo folder (delete it yourself)%s\n' "$DIM" "$RESET"
 echo
 
-read -r -p "Proceed? [y/N] " reply
+# `|| reply=""` so that EOF / non-interactive stdin (where read returns non-zero) is treated as
+# a declined prompt under `set -e`, rather than tripping the ERR trap with a confusing line error.
+read -r -p "Proceed? [y/N] " reply || reply=""
 [[ "$reply" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
 echo
 
 info "Removing image '$IMAGE'"
-if docker image inspect "$IMAGE" >/dev/null 2>&1; then
+# Probe with `image ls -q`, not `image inspect`: some Docker Desktop builds have a broken
+# `image inspect <name>` that false-negatives on a present image, which would make us wrongly
+# report "not present" and leave the image behind. `ls -q` resolves the name like `rmi` does.
+if [ -n "$(docker image ls -q "$IMAGE" 2>/dev/null)" ]; then
   # Dim + indent the rmi output the same way install.sh dims `docker build` output.
   docker rmi -f "$IMAGE" 2>&1 \
     | sed $'s/\e\\[[0-9;]*m//g' \
