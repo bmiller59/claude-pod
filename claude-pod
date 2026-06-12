@@ -8,11 +8,15 @@ err() { printf '%s✗%s %s\n' "$RED" "$RESET" "$*" >&2; }
 die() { err "$*"; exit 1; }
 
 # Preflight checks, in causal order. Without these the failures surface as cryptic Docker errors:
-#   - daemon down -> the image-inspect below would falsely blame a missing image.
+#   - daemon down -> the image check below would falsely blame a missing image.
 #   - missing image -> Docker would try to pull 'claude-pod' from Docker Hub and fail.
+# We probe existence with `image ls -q`, not `image inspect`: it resolves the name the same way
+# `docker run` does, so the check can't disagree with whether the run will actually work. (Some
+# Docker Desktop builds have a broken `image inspect <name>` that false-negatives on a present
+# image, which would otherwise wrongly send you to re-run install.sh.)
 command -v docker >/dev/null || die "Docker is required but not on PATH."
 docker info >/dev/null 2>&1 || die "Docker daemon is not running."
-if ! docker image inspect claude-pod >/dev/null 2>&1; then
+if [ -z "$(docker image ls -q claude-pod 2>/dev/null)" ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   err "Image 'claude-pod' not found."
   die "Please run '${BOLD}${SCRIPT_DIR}/install.sh${RESET}' first to build the local container."
