@@ -120,7 +120,7 @@ PORTS="3000 5173" claude-pod
 PORTS="8080:80" claude-pod
 
 # Or, alternatively, without using aliases
-PORTS="5173:5173" ~/tools/claude-pod
+PORTS="5173:5173" ~/tools/claude-pod/claude-pod
 ```
 
 > **Bind your dev server to `0.0.0.0` inside the container, not `localhost`.** Most dev servers default to `localhost`, which means they only listen on the container's own loopback — your host browser can't reach them even with `PORTS=...` set. Common fixes:
@@ -150,7 +150,7 @@ Pinned versions cache normally across rebuilds. The script prints the resolved v
 
 ### Customizing the image
 
-The image is intentionally minimal: `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + Claude Code. Nothing language-specific. Anything your projects need (Python, build tools, other toolchains) you add yourself — edit the `Dockerfile` and re-run `./install.sh`.
+The image is intentionally minimal: `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + Claude Code. Nothing language-specific. Anything your projects need (Python, build tools, other toolchains) you add yourself — edit the `Dockerfile` and re-run `~/tools/claude-pod/install.sh`.
 
 ## Security and limits
 
@@ -235,12 +235,12 @@ If a platform doesn't behave as expected, please open an issue.
 ### Uninstall
 
 ```sh
-./uninstall.sh
+~/tools/claude-pod/uninstall.sh
 ```
 
 Removes `~/.claude-pod/` and the `claude-pod` image after confirmation. Tells you exactly what it isn't touching (`node:24-slim`, build cache, this repo) and how to clean those up yourself.
 
-If you added a shell alias for convenience (e.g. `alias claude-pod=...` or `alias cc=...` in `~/.zshrc` / `~/.bashrc`), remove that line too — `uninstall.sh` doesn't touch your shell rc files.
+If you added a shell alias for convenience (e.g. `alias claude-pod=...` in `~/.zshrc` / `~/.bashrc`), remove that line too — `uninstall.sh` doesn't touch your shell rc files.
 
 ### License and trademarks
 
