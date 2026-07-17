@@ -23,9 +23,10 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   row "Uninstall:"      "$HERE/uninstall.sh"
   printf '\n%sOptions%s  (prefix any run command):\n' "$BOLD" "$RESET"
   row "Publish ports:"  "PORTS=\"3000 5173\" $HERE/claude-pod"
-  row "Isolate/limit:"  "NET=none MEMORY=4g PIDS=512 $HERE/claude-pod"
+  row "Isolate/limit:"  "NET=none MEMORY=4g CPUS=2 PIDS=512 $HERE/claude-pod"
   row "Reach host services:" "HOST_SERVICES=1 $HERE/claude-pod"
   row "Whitelist MCP servers:" "MCP_SERVERS=codegraph $HERE/claude-pod (default; MCP_SERVERS=none to disable)"
+  row "Forward MCP secrets:" "MCP_SERVER_ENV=AGENTMEMORY_SECRET $HERE/claude-pod"
   printf '\n'
   row "Shortcut alias:" "alias claude-pod=$HERE/claude-pod"
   row "Full README:"    "https://github.com/bmiller59/claude-pod"
