@@ -24,7 +24,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   printf '\n%sOptions%s  (prefix any run command):\n' "$BOLD" "$RESET"
   row "Publish ports:"  "PORTS=\"3000 5173\" $HERE/claude-pod"
   row "Isolate/limit:"  "NET=none MEMORY=4g CPUS=2 PIDS=512 $HERE/claude-pod"
-  row "Reach host services:" "HOST_SERVICES=1 $HERE/claude-pod"
+  row "Reach host services:" "HOST_SERVICES=1 $HERE/claude-pod (or HOST_SERVICES=\"27017 8000\" to proxy those ports onto localhost)"
   row "Whitelist MCP servers:" "MCP_SERVERS=codegraph $HERE/claude-pod (default; MCP_SERVERS=none to disable)"
   row "Forward MCP secrets:" "MCP_SERVER_ENV=AGENTMEMORY_SECRET $HERE/claude-pod"
   printf '\n'
@@ -132,13 +132,29 @@ fi
 #   share this limitation -- not verified here.
 #   Deliberately coarse: once resolvable, the container can reach ANY port on the host's loopback,
 #   not just the one your tests use. Docker has no docker-run flag or compose key that restricts
-#   *which* host ports host-gateway can reach; scoping it further would need a relay process per
-#   allowed port, which is disproportionate given outbound network is already unrestricted by
-#   default (see NET=none above) -- this is the same class and scale of risk, opt-in the same way.
+#   *which* host ports host-gateway can reach.
 #   Mutually exclusive with NET=none: a no-network container can't resolve or reach the host either.
-if [ "${HOST_SERVICES:-}" = "1" ]; then
-  [ "${NET:-}" = "none" ] && die "HOST_SERVICES=1 and NET=none are mutually exclusive: a no-network container can't reach the host either."
+#
+#   HOST_SERVICES can also be a space-separated port list instead of "1", e.g. HOST_SERVICES="27017
+#   8000". Beyond --add-host, this starts a per-port socat relay inside the container (see the
+#   Dockerfile's entrypoint) listening on the container's OWN 127.0.0.1:<port> and forwarding to
+#   host.docker.internal:<port>. That makes reaching the host service transparent: test config left
+#   pointed at localhost:<port> works unchanged whether you're in the pod or not, no
+#   host.docker.internal rewrite needed. Scoped to exactly the ports you name, unlike the "1" form.
+if [ -n "${HOST_SERVICES:-}" ]; then
+  [ "${NET:-}" = "none" ] && die "HOST_SERVICES and NET=none are mutually exclusive: a no-network container can't reach the host either."
   DOCKER_FLAGS+=("--add-host=host.docker.internal:host-gateway")
+  if [ "$HOST_SERVICES" != "1" ]; then
+    for _hs_port in $HOST_SERVICES; do
+      if [[ ! "$_hs_port" =~ ^[0-9]+$ ]]; then
+        die "HOST_SERVICES entry '$_hs_port' is invalid; expected the literal '1' or a space-separated list of ports (digits only)."
+      fi
+      if (( 10#$_hs_port < 1 || 10#$_hs_port > 65535 )); then
+        die "HOST_SERVICES entry '$_hs_port' is outside the 1-65535 range."
+      fi
+    done
+    DOCKER_FLAGS+=("-e" "HOST_FORWARD_PORTS=$HOST_SERVICES")
+  fi
 fi
 
 # Resource Limits (host availability):

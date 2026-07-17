@@ -3,8 +3,9 @@ FROM node:24-slim
 
 # git/curl/less are baseline dev tools; jq and gh are reached for by Claude's built-in workflows
 # (JSON pipelines and the GitHub CLI for PRs/issues/releases). ca-certificates is needed for HTTPS.
+# socat backs the HOST_SERVICES port-forwarding entrypoint below.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates curl less jq gh \
+ && apt-get install -y --no-install-recommends git ca-certificates curl less jq gh socat \
  && rm -rf /var/lib/apt/lists/*
 
 # Override at build time with --build-arg CLAUDE_CODE_VERSION=2.x.y to pin a specific
@@ -47,4 +48,26 @@ alias ls='ls --color=auto'
 alias grep='grep --color=auto'
 EOF
 
+# Entrypoint: proxies named host ports onto the container's own loopback before running the real
+# command, so `claude-pod`'s HOST_SERVICES=<ports> option (see the `claude-pod` script) lets test
+# config keep pointing at `localhost:<port>` unchanged whether running in the pod or not, instead
+# of requiring `host.docker.internal:<port>` inside the sandbox. HOST_FORWARD_PORTS is set by that
+# script via `-e`, never by the user directly. Backgrounded (&) then exec'd past: exec replaces this
+# script's own process image, but the socat children it already forked stay alive as children of
+# whatever ends up as PID 1.
+RUN cat > /usr/local/bin/claude-pod-entrypoint.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -n "${HOST_FORWARD_PORTS:-}" ]; then
+  for port in $HOST_FORWARD_PORTS; do
+    socat TCP-LISTEN:"$port",bind=127.0.0.1,fork,reuseaddr TCP:host.docker.internal:"$port" &
+  done
+fi
+
+exec "$@"
+EOF
+RUN chmod 755 /usr/local/bin/claude-pod-entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/claude-pod-entrypoint.sh"]
 CMD ["bash"]

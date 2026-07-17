@@ -175,6 +175,16 @@ DATABASE_URL=postgres://host.docker.internal:5432/mydb
 
 This is deliberately coarse, not scoped to one port: once `host.docker.internal` resolves, the container can attempt to reach *any* port on your host's loopback interface, not just the one your tests use. Docker has no flag that restricts host-gateway to specific ports. `HOST_SERVICES=1` and `NET=none` are mutually exclusive.
 
+#### Transparent port forwarding
+
+If you'd rather not touch your test config at all — no `host.docker.internal` rewrite, same connection string in and out of the pod — pass `HOST_SERVICES` a space-separated list of ports instead of `1`:
+
+```sh
+HOST_SERVICES="27017 8000" claude-pod
+```
+
+For each port listed, the container relays its own `127.0.0.1:<port>` to `host.docker.internal:<port>` via a small `socat` proxy started by the image's entrypoint before your command runs. Code inside the pod can keep connecting to `localhost:27017` unchanged, whether it's running in the sandbox or on your host directly. This is scoped to exactly the ports you name — unlike the `HOST_SERVICES=1` form, it does not open up the rest of your host's loopback interface. The same platform caveat above still applies: the service itself must be bound to `0.0.0.0` (not just `127.0.0.1`) on native Linux Docker for `host.docker.internal` to actually reach it.
+
 ### MCP servers
 
 Your host's MCP servers aren't available inside the pod by default — the pod's Claude config is seeded fresh and never touches your host's real `~/.claude.json`, where MCP servers are registered. `claude-pod` whitelists them by name via `MCP_SERVERS`, and **defaults to `codegraph`** (this fork's one personal default — see [CLAUDE.md](CLAUDE.md)):
@@ -255,7 +265,7 @@ The whole tool is four tiny files:
 
 **Still exposed:**
 - **The project folder itself.** Anything inside it — `.env`, `.git/config` (which can carry credentials for private remotes), private keys committed by mistake, `node_modules`, sibling worktrees, scratch files — is fully readable *and* writable by code running in the container. Don't run `claude-pod` from a folder whose contents you wouldn't trust the AI (or a malicious dependency it just installed) to see and modify.
-- **The network.** Outbound is unrestricted by default. A malicious payload could exfiltrate the project contents or burn your Anthropic API quota. For offline work you can cut networking entirely with `NET=none` (see [Network isolation and resource limits](#network-isolation-and-resource-limits)), but that also takes Claude itself offline — there's no built-in egress allowlist that would keep Claude online while blocking everything else. Opting into `HOST_SERVICES=1` (see [Reaching host services](#reaching-host-services)) widens this further: the container can then also reach anything bound to your host's own loopback interface.
+- **The network.** Outbound is unrestricted by default. A malicious payload could exfiltrate the project contents or burn your Anthropic API quota. For offline work you can cut networking entirely with `NET=none` (see [Network isolation and resource limits](#network-isolation-and-resource-limits)), but that also takes Claude itself offline — there's no built-in egress allowlist that would keep Claude online while blocking everything else. Opting into `HOST_SERVICES=1` (see [Reaching host services](#reaching-host-services)) widens this further: the container can then also reach anything bound to your host's own loopback interface. `HOST_SERVICES="<ports>"` (the transparent-forwarding form) is narrower — only the named ports are reachable — but still opt-in for the same reason.
 - **Your Anthropic login** (stored in `~/.claude-pod/` on the host, separate from any host Claude install, shared across sandboxed projects).
 
 **Where Claude can actually write** — two paths, both intentional bind mounts:
@@ -290,9 +300,13 @@ PIDS=512 claude-pod
 # Let the container reach services bound to your host's loopback interface (e.g. a local Postgres
 # your tests need). See "Reaching host services" above for details.
 HOST_SERVICES=1 claude-pod
+
+# Same, but transparently: proxy just these ports onto the container's own localhost so test
+# config doesn't need to change between host and pod. See "Transparent port forwarding" above.
+HOST_SERVICES="27017 8000" claude-pod
 ```
 
-`NET=none` and `PORTS` are mutually exclusive — a container with no network can't publish ports. `NET=none` and `HOST_SERVICES=1` are also mutually exclusive — a no-network container can't resolve or reach the host either. `--pids-limit` is always applied (it contains fork bombs, which dropped capabilities do *not* prevent); raise `PIDS=` if a very parallel build hits the ceiling.
+`NET=none` and `PORTS` are mutually exclusive — a container with no network can't publish ports. `NET=none` and `HOST_SERVICES` are also mutually exclusive — a no-network container can't resolve or reach the host either. `--pids-limit` is always applied (it contains fork bombs, which dropped capabilities do *not* prevent); raise `PIDS=` if a very parallel build hits the ceiling.
 
 ### Side effects outside the project folder
 
