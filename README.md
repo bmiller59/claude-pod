@@ -152,6 +152,8 @@ This is deliberately **not** the whole `~/.claude/` directory: your `.credential
 
 If your `settings.json` references a hook or `statusLine.command` pointing somewhere other than the paths above, that reference will fail inside the pod (file not found) — only the paths listed here are mounted.
 
+> **Project-scoped plugins won't activate inside the pod — only user-scoped ones will.** Run `claude plugin list` (or check `~/.claude/plugins/installed_plugins.json`) on your host: plugins installed at `"scope": "user"` show up inside the pod, but a plugin installed at `"scope": "project"` (pinned to one project path) does not, even though its skill files are mounted and readable. That's because project-scope activation is resolved through your host's real `~/.claude.json` (a file sibling to `~/.claude/`, holding trust/config state for *every* project you've used Claude Code in), which the pod intentionally does not mount — mounting it would undo "other projects are unreachable" above. If a plugin you rely on inside the pod is project-scoped, reinstall it at user scope on your host.
+
 ### Reaching host services
 
 By default, the container can't reach anything bound to your host's loopback interface (`127.0.0.1`) — a local Postgres, Redis, or other dev-only service is invisible to it, same as the rest of your machine. If your tests need one, set `HOST_SERVICES=1`:

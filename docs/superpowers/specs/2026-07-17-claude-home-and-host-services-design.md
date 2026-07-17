@@ -79,6 +79,19 @@ mounts are added, and nothing is created under the host's `~/.claude` or
 - Read-only means Claude in the pod can *see* skills/plugins/instructions,
   but can't install a new plugin or edit global `CLAUDE.md` from inside the
   pod — that has to happen on the host.
+- **Discovered during Task 4's manual smoke test:** project-scoped plugins
+  (`installed_plugins.json` entry with `"scope": "project"`, pinned to one
+  `projectPath`) do not activate inside the pod, even though their skill
+  files mount and read correctly — confirmed by reading a mounted plugin's
+  `SKILL.md` directly, and by listing loaded skills inside the pod (a
+  user-scoped plugin's skills appeared; a project-scoped plugin's did not,
+  even run from a path under the pinned project path). Project-scope
+  activation is resolved through the host's real `~/.claude.json` (sibling
+  to `~/.claude/`, holding trust/config state for every project on the
+  host), which this design deliberately does not mount — doing so would
+  undo "other projects are unreachable." Documented in the README as a
+  known limitation with the fix (reinstall the plugin at user scope on the
+  host) rather than engineered around.
 
 ## 2. `HOST_SERVICES=1` — opt-in container→host reachability
 
@@ -101,6 +114,20 @@ same way.
 Usage: point test config at `host.docker.internal:<port>` (e.g.
 `DATABASE_URL=postgres://host.docker.internal:5432/...`) the same way you
 would in a docker-compose file using `extra_hosts`.
+
+**Platform caveat, discovered during implementation:** on native Linux
+Docker, `host.docker.internal` (via `host-gateway`) resolves to the Docker
+bridge gateway IP (e.g. `172.17.0.1`), not to `127.0.0.1`. A service bound
+only to loopback — the default for a stock Postgres or Redis install, i.e.
+this section's own motivating example — will not accept the connection even
+though the name resolves; the service must be rebound to `0.0.0.0` (or the
+bridge-facing interface). This is the mirror image of the existing
+`PORTS`/"bind to `0.0.0.0` not `localhost`" caveat, in the opposite
+direction. Docker Desktop (macOS/Windows) routes `host.docker.internal`
+through its VM differently and may not share this limitation — not verified
+here. Both the code comment and the README must state this caveat plainly;
+shipping the unqualified claim would overpromise the exact scenario named as
+the rationale.
 
 ### Validation
 
@@ -144,7 +171,9 @@ Manual verification (this is infra, not unit-testable in isolation):
    confirm `claude-pod` runs without error and creates nothing under the
    fake `~/.claude` or `~/.agents`.
 5. Confirm `HOST_SERVICES=1` resolves `host.docker.internal` inside the
-   container and can reach a service bound to `127.0.0.1` on the host.
+   container and can reach a service bound to `0.0.0.0` on the host (on
+   native Linux Docker, a service bound only to `127.0.0.1` is not reachable
+   this way — see the platform caveat above).
 6. Confirm `HOST_SERVICES=1 NET=none claude-pod` dies with a clear error
    before touching Docker.
 
