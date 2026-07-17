@@ -15,7 +15,8 @@ It's useful in two cases:
 
 It's not full isolation — here's the boundary:
 
-- ✅ **Outside the launch folder is unreachable.** Your home directory, `~/.ssh`, `~/.aws`, other projects, and the host shell aren't mounted, so the container can't see them.
+- ✅ **Outside the launch folder is unreachable — with one narrow, read-only exception.** Your home directory, `~/.ssh`, `~/.aws`, other projects, and the host shell aren't mounted, so the container can't see them.
+- 📖 **Your Claude Code config is mounted read-only, by default.** Personal skills, installed plugins, global `CLAUDE.md`, and `settings.json`/`statusline.sh` are bind-mounted from the host so Claude behaves the same inside the pod — readable, never writable. Everything else under your home directory (credentials, session history, other projects' transcripts) stays unmounted. See [Claude config access](#claude-config-access).
 - ⚠️ **Inside the launch folder is fully exposed.** Any `.env`, `.git/config`, or keys in it are readable and writable; outbound network is open, so contents can be read or exfiltrated; and your Anthropic login is stored on the host under `~/.claude-pod/`.
 - 🚫 **Don't launch from `~` or `/` or other sensitive folders.** That mounts your whole home or filesystem into the container and defeats the point.
 
@@ -48,6 +49,8 @@ Docker is the only requirement — no Node.js, npm, or `claude` needed on your h
   - [Aliases](#aliases)
   - [First launch (login)](#first-launch-login)
   - [Exposing ports](#exposing-ports)
+  - [Claude config access](#claude-config-access)
+  - [Reaching host services](#reaching-host-services)
   - [Pasting images and screenshots](#pasting-images-and-screenshots)
   - [Updating or pinning the Claude Code version](#updating-or-pinning-the-claude-code-version)
   - [Customizing the image](#customizing-the-image)
@@ -133,6 +136,40 @@ PORTS="5173:5173" ~/tools/claude-pod/claude-pod
 >
 > The host-side mapping is still `127.0.0.1`-only (forced by `claude-pod`), so binding `0.0.0.0` inside the container does not expose your dev server to your LAN.
 
+### Claude config access
+
+By default, `claude-pod` bind-mounts a curated, **read-only** subset of your host's Claude Code config, so Claude behaves the same inside the pod as it does on your host:
+
+- `~/.claude/skills` — your personal skills.
+- `~/.agents` — if your `~/.claude/skills/*` entries are symlinks (some skill-manager setups do this), this is where they actually resolve to. Mounted at the same relative path so the symlinks work inside the container too.
+- `~/.claude/plugins` — installed marketplace plugins (e.g. `superpowers`).
+- `~/.claude/CLAUDE.md` — your global instructions.
+- `~/.claude/settings.json` and `~/.claude/statusline.sh` — model/permissions/statusline config.
+
+Each of these is mounted only if it exists on your host, and only read-only — Claude can see them but can never write back, install a new plugin, or edit your global `CLAUDE.md` from inside the pod.
+
+This is deliberately **not** the whole `~/.claude/` directory: your `.credentials.json`, `history.jsonl`, and `projects/` (session transcripts from every other project you've used Claude Code on) are never mounted, so "other projects are unreachable" ([What is and isn't isolated](#what-is-and-isnt-isolated)) still holds.
+
+If your `settings.json` references a hook or `statusLine.command` pointing somewhere other than the paths above, that reference will fail inside the pod (file not found) — only the paths listed here are mounted.
+
+### Reaching host services
+
+By default, the container can't reach anything bound to your host's loopback interface (`127.0.0.1`) — a local Postgres, Redis, or other dev-only service is invisible to it, same as the rest of your machine. If your tests need one, set `HOST_SERVICES=1`:
+
+```sh
+HOST_SERVICES=1 claude-pod
+```
+
+This lets the container resolve `host.docker.internal`. Point your test config at it the same way you'd use `extra_hosts` in a docker-compose file:
+
+```sh
+DATABASE_URL=postgres://host.docker.internal:5432/mydb
+```
+
+> **On native Linux Docker, bind the service to `0.0.0.0`, not just `127.0.0.1`.** `host.docker.internal` resolves to the Docker bridge gateway IP (e.g. `172.17.0.1`), not to `127.0.0.1` — a service bound only to loopback (the default for a stock Postgres or Redis install) won't accept the connection even though the name resolves. Rebind the service to `0.0.0.0` (or the bridge-facing interface) to reach it. This is the mirror image of the [Exposing ports](#exposing-ports) caveat above, in the opposite direction. Docker Desktop (macOS/Windows) routes `host.docker.internal` through the VM differently and may not have this limitation — not verified here.
+
+This is deliberately coarse, not scoped to one port: once `host.docker.internal` resolves, the container can attempt to reach *any* port on your host's loopback interface, not just the one your tests use. Docker has no flag that restricts host-gateway to specific ports. `HOST_SERVICES=1` and `NET=none` are mutually exclusive.
+
 ### Pasting images and screenshots
 
 Claude can only read files that live **inside the project folder** — that's the one directory bind-mounted into the container. Images on your Desktop or in Downloads aren't mounted, so pasting one straight from there hands Claude a path it can't reach. This is the same isolation that keeps the rest of your machine private from the container ([What is and isn't isolated](#what-is-and-isnt-isolated)); the small bit of friction below is the price for not exposing those default locations.
@@ -171,7 +208,7 @@ The image is intentionally minimal: `node:24-slim` + `git` + `curl` + `less` + `
 The whole tool is four tiny files:
 
 - **`Dockerfile`** — `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + `@anthropic-ai/claude-code`.
-- **`claude-pod`** — one `docker run` command that mounts your current directory (plus a small state dir for login and history) and nothing else of your machine.
+- **`claude-pod`** — one `docker run` command that mounts your current directory (plus a small state dir for login and history), and — read-only, by default — a curated subset of your Claude Code skills, plugins, and global config.
 - **`install.sh`** — checks Docker and builds the image. Doesn't touch any system path; the tool stays self-contained in this folder.
 - **`uninstall.sh`** — removes the image and `~/.claude-pod/` (auth + session history) after confirmation. Lists what it doesn't touch so you can clean those up yourself.
 
@@ -180,10 +217,11 @@ The whole tool is four tiny files:
 **Safe from Claude:**
 - Everything outside the project folder you launched from. `~/.ssh`, `~/.aws`, `~/.zshrc`, browser data, other projects — all unreachable.
 - The host shell. No way to execute commands on your host machine.
+- Your `~/.claude/.credentials.json`, `history.jsonl`, and `projects/` (session transcripts from every other project). Only a narrow, read-only subset of `~/.claude/` is mounted — see [Claude config access](#claude-config-access).
 
 **Still exposed:**
 - **The project folder itself.** Anything inside it — `.env`, `.git/config` (which can carry credentials for private remotes), private keys committed by mistake, `node_modules`, sibling worktrees, scratch files — is fully readable *and* writable by code running in the container. Don't run `claude-pod` from a folder whose contents you wouldn't trust the AI (or a malicious dependency it just installed) to see and modify.
-- **The network.** Outbound is unrestricted by default. A malicious payload could exfiltrate the project contents or burn your Anthropic API quota. For offline work you can cut networking entirely with `NET=none` (see [Network isolation and resource limits](#network-isolation-and-resource-limits)), but that also takes Claude itself offline — there's no built-in egress allowlist that would keep Claude online while blocking everything else.
+- **The network.** Outbound is unrestricted by default. A malicious payload could exfiltrate the project contents or burn your Anthropic API quota. For offline work you can cut networking entirely with `NET=none` (see [Network isolation and resource limits](#network-isolation-and-resource-limits)), but that also takes Claude itself offline — there's no built-in egress allowlist that would keep Claude online while blocking everything else. Opting into `HOST_SERVICES=1` (see [Reaching host services](#reaching-host-services)) widens this further: the container can then also reach anything bound to your host's own loopback interface.
 - **Your Anthropic login** (stored in `~/.claude-pod/` on the host, separate from any host Claude install, shared across sandboxed projects).
 
 **Where Claude can actually write** — two paths, both intentional bind mounts:
@@ -214,9 +252,13 @@ MEMORY=4g CPUS=2 claude-pod
 
 # Lower the process/thread cap when running untrusted code (default is 4096, generous for builds).
 PIDS=512 claude-pod
+
+# Let the container reach services bound to your host's loopback interface (e.g. a local Postgres
+# your tests need). See "Reaching host services" above for details.
+HOST_SERVICES=1 claude-pod
 ```
 
-`NET=none` and `PORTS` are mutually exclusive — a container with no network can't publish ports. `--pids-limit` is always applied (it contains fork bombs, which dropped capabilities do *not* prevent); raise `PIDS=` if a very parallel build hits the ceiling.
+`NET=none` and `PORTS` are mutually exclusive — a container with no network can't publish ports. `NET=none` and `HOST_SERVICES=1` are also mutually exclusive — a no-network container can't resolve or reach the host either. `--pids-limit` is always applied (it contains fork bombs, which dropped capabilities do *not* prevent); raise `PIDS=` if a very parallel build hits the ceiling.
 
 ### Side effects outside the project folder
 
@@ -228,7 +270,7 @@ Everything this repo causes to exist outside the project you launch it from:
 - Outbound network during build: Docker Hub, Debian apt mirrors, npm registry. During runtime: `api.anthropic.com` and whatever your project code reaches (network is unrestricted).
 - While a session is running: one container process, and any ports you explicitly mapped via `PORTS` bound on `127.0.0.1`.
 
-No `sudo`, no writes to `/usr/local/`, `/etc/`, `~/.zshrc`, `~/Library/`, your existing `~/.claude/`, or anywhere else on the host.
+No `sudo`, no writes to `/usr/local/`, `/etc/`, `~/.zshrc`, `~/Library/`, or anywhere else on the host. Your existing `~/.claude/` (skills, plugins, `CLAUDE.md`, `settings.json`, `statusline.sh`) and `~/.agents` are read from by default, but never written to — see [Claude config access](#claude-config-access).
 
 ## Reference
 
