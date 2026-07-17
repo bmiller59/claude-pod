@@ -128,6 +128,34 @@ DOCKER_FLAGS+=("--pids-limit=${PIDS:-4096}")
 [ -n "${MEMORY:-}" ] && DOCKER_FLAGS+=("--memory=$MEMORY")
 [ -n "${CPUS:-}" ]   && DOCKER_FLAGS+=("--cpus=$CPUS")
 
+# Optional Claude Config Access (skills, plugins, global instructions):
+#   On by default. Bind-mounts a curated, read-only subset of the host's ~/.claude/ (plus
+#   ~/.agents, which some skill-manager setups symlink ~/.claude/skills/* into) so Claude behaves
+#   the same inside the pod as it does on the host: personal skills, installed plugins, global
+#   CLAUDE.md, and settings.json/statusline.sh. Read-only (":ro") -- the container can see these
+#   but never write back to them.
+#   Deliberately NOT the whole ~/.claude/ directory: that also holds .credentials.json,
+#   history.jsonl, and projects/ (session transcripts from every OTHER project you've used Claude
+#   Code on), which would blow a hole in "other projects are unreachable" (see README's Security
+#   and limits).
+#   Each path is mounted only if it exists on the host. This matters, not just tidiness: Docker's
+#   bind mount auto-creates the *target* path when the *source* is missing, and since source and
+#   target share the same relative path here, an unconditional mount would silently create an
+#   empty file/directory inside the user's real ~/.claude or ~/.agents the first time this ran
+#   without one of these paths present -- mutating host state, which this tool otherwise never
+#   does.
+CLAUDE_HOME_PATHS=(
+  ".claude/skills"
+  ".agents"
+  ".claude/plugins"
+  ".claude/CLAUDE.md"
+  ".claude/settings.json"
+  ".claude/statusline.sh"
+)
+for _claude_home_rel in "${CLAUDE_HOME_PATHS[@]}"; do
+  [ -e "$HOME/$_claude_home_rel" ] && DOCKER_FLAGS+=("-v" "$HOME/$_claude_home_rel:/home/claude-pod/$_claude_home_rel:ro")
+done
+
 # Hardening:
 #   --cap-drop=ALL                       Drop all Linux capabilities. An interactive dev shell
 #                                        as an unprivileged user needs none; this closes off
