@@ -119,9 +119,15 @@ fi
 
 # Optional Host-Service Reachability:
 #   Off by default. HOST_SERVICES=1 adds --add-host so the container can resolve
-#   host.docker.internal, letting test code inside the pod reach a service already bound to the
-#   host's loopback interface (e.g. a local Postgres or Redis on 127.0.0.1). Point test config at
-#   host.docker.internal:<port> the same way you'd use `extra_hosts` in a docker-compose file.
+#   host.docker.internal, letting test code inside the pod reach a service bound to the host's
+#   loopback interface. Point test config at host.docker.internal:<port> the same way you'd use
+#   `extra_hosts` in a docker-compose file.
+#   Platform caveat: on native Linux Docker, host.docker.internal resolves to the Docker bridge
+#   gateway IP (e.g. 172.17.0.1), NOT to 127.0.0.1. A service bound only to loopback -- the default
+#   for a stock Postgres or Redis install -- will NOT accept the connection even though the name
+#   resolves; rebind the service to 0.0.0.0 (or the bridge-facing interface) to reach it. Docker
+#   Desktop (macOS/Windows) routes host.docker.internal through its VM differently and may not
+#   share this limitation -- not verified here.
 #   Deliberately coarse: once resolvable, the container can reach ANY port on the host's loopback,
 #   not just the one your tests use. Docker has no docker-run flag or compose key that restricts
 #   *which* host ports host-gateway can reach; scoping it further would need a relay process per
