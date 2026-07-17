@@ -24,6 +24,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   printf '\n%sOptions%s  (prefix any run command):\n' "$BOLD" "$RESET"
   row "Publish ports:"  "PORTS=\"3000 5173\" $HERE/claude-pod"
   row "Isolate/limit:"  "NET=none MEMORY=4g PIDS=512 $HERE/claude-pod"
+  row "Reach host services:" "HOST_SERVICES=1 $HERE/claude-pod"
   printf '\n'
   row "Shortcut alias:" "alias claude-pod=$HERE/claude-pod"
   row "Full README:"    "https://github.com/trekhleb/claude-pod"
@@ -114,6 +115,22 @@ fi
 if [ "${NET:-}" = "none" ]; then
   [ -n "${PORTS:-}" ] && die "NET=none and PORTS are mutually exclusive: a no-network container can't publish ports."
   DOCKER_FLAGS+=("--network=none")
+fi
+
+# Optional Host-Service Reachability:
+#   Off by default. HOST_SERVICES=1 adds --add-host so the container can resolve
+#   host.docker.internal, letting test code inside the pod reach a service already bound to the
+#   host's loopback interface (e.g. a local Postgres or Redis on 127.0.0.1). Point test config at
+#   host.docker.internal:<port> the same way you'd use `extra_hosts` in a docker-compose file.
+#   Deliberately coarse: once resolvable, the container can reach ANY port on the host's loopback,
+#   not just the one your tests use. Docker has no docker-run flag or compose key that restricts
+#   *which* host ports host-gateway can reach; scoping it further would need a relay process per
+#   allowed port, which is disproportionate given outbound network is already unrestricted by
+#   default (see NET=none above) -- this is the same class and scale of risk, opt-in the same way.
+#   Mutually exclusive with NET=none: a no-network container can't resolve or reach the host either.
+if [ "${HOST_SERVICES:-}" = "1" ]; then
+  [ "${NET:-}" = "none" ] && die "HOST_SERVICES=1 and NET=none are mutually exclusive: a no-network container can't reach the host either."
+  DOCKER_FLAGS+=("--add-host=host.docker.internal:host-gateway")
 fi
 
 # Resource Limits (host availability):
