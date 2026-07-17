@@ -18,6 +18,10 @@ ARG CLAUDE_CODE_VERSION=latest
 ARG CACHEBUST=1
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
+# codegraph: this is a personal fork (see CLAUDE.md) baked in because we use it constantly via the
+# MCP_SERVERS whitelist in the claude-pod script. Not a general-purpose default for other forks.
+RUN npm install -g @colbymchenry/codegraph
+
 # We DO NOT use `USER node` here. Instead, we pass `--user "$(id -u):$(id -g)"` dynamically
 # at runtime in the `claude-pod` script. This ensures perfect file permission alignment
 # between the host and the container, especially on Linux environments.

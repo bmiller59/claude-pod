@@ -2,6 +2,8 @@
 
 > Docker sandbox for the Claude Code CLI. Runs Claude against one project folder — including with `--dangerously-skip-permissions` — while your home directory, SSH keys, and other projects stay invisible to the container. Unofficial.
 
+> **This is Brendan's personal fork** of [trekhleb/claude-pod](https://github.com/trekhleb/claude-pod). Kept clean and general-purpose where that's easy, but a few things (like `codegraph` baked into the default image) are here specifically because Brendan uses them constantly — see [CLAUDE.md](CLAUDE.md). If you're not Brendan, the upstream repo is probably the better starting point.
+
 ![claude-pod](assets/cover.jpeg)
 
 ## TL;DR
@@ -24,7 +26,7 @@ The practical effect: the worst case is narrowed from "your whole machine" to "t
 
 ```sh
 # Clone this repo once, anywhere you like (~/tools/claude-pod is just an example)
-git clone https://github.com/trekhleb/claude-pod.git ~/tools/claude-pod
+git clone https://github.com/bmiller59/claude-pod.git ~/tools/claude-pod
 
 # Build the image (once) — runs from anywhere, no cd needed
 ~/tools/claude-pod/install.sh
@@ -39,7 +41,7 @@ cd ~/projects/your-project
 ~/tools/claude-pod/claude-pod --help
 ```
 
-Docker is the only requirement — no Node.js, npm, or `claude` needed on your host. For the full threat model and the four-file design, see [Security and limits](#security-and-limits). For the official approach, see Anthropic's [Claude Code sandboxing documentation](https://code.claude.com/docs/en/sandboxing).
+Docker is the only requirement — no Node.js, npm, or `claude` needed on your host. (One exception: [whitelisting MCP servers](#mcp-servers) needs `jq` on the host, but only if you use that feature.) For the full threat model and the four-file design, see [Security and limits](#security-and-limits). For the official approach, see Anthropic's [Claude Code sandboxing documentation](https://code.claude.com/docs/en/sandboxing).
 
 ## Contents
 
@@ -51,6 +53,7 @@ Docker is the only requirement — no Node.js, npm, or `claude` needed on your h
   - [Exposing ports](#exposing-ports)
   - [Claude config access](#claude-config-access)
   - [Reaching host services](#reaching-host-services)
+  - [MCP servers](#mcp-servers)
   - [Pasting images and screenshots](#pasting-images-and-screenshots)
   - [Updating or pinning the Claude Code version](#updating-or-pinning-the-claude-code-version)
   - [Customizing the image](#customizing-the-image)
@@ -172,6 +175,35 @@ DATABASE_URL=postgres://host.docker.internal:5432/mydb
 
 This is deliberately coarse, not scoped to one port: once `host.docker.internal` resolves, the container can attempt to reach *any* port on your host's loopback interface, not just the one your tests use. Docker has no flag that restricts host-gateway to specific ports. `HOST_SERVICES=1` and `NET=none` are mutually exclusive.
 
+### MCP servers
+
+Your host's MCP servers aren't available inside the pod by default — the pod's Claude config is seeded fresh and never touches your host's real `~/.claude.json`, where MCP servers are registered. `claude-pod` whitelists them by name via `MCP_SERVERS`, and **defaults to `codegraph`** (this fork's one personal default — see [CLAUDE.md](CLAUDE.md)):
+
+```sh
+# Default: just codegraph. No env var needed.
+claude-pod
+
+# Override the default entirely (include codegraph yourself if you still want it too)
+MCP_SERVERS="codegraph agentmemory" claude-pod
+
+# Disable MCP servers entirely
+MCP_SERVERS=none claude-pod
+```
+
+This copies just the named entries out of your host's `~/.claude.json` `mcpServers` object into the pod's own config, replacing it fresh on every run — including a run where the resolved list is empty, so a server whitelisted earlier doesn't linger on a later run that no longer asks for it. A typo — a name not found in your host's `mcpServers` — fails with a clear error before Docker even starts. This step needs `jq` on your host; it's the one place this tool needs something besides Docker, and only when the resolved server list is non-empty.
+
+The server's underlying command has to already exist in the image — `codegraph` is baked into this fork's `Dockerfile` (see [Customizing the image](#customizing-the-image)) since it's used constantly here; anything else you whitelist may need the same treatment, or it'll simply fail to start inside the pod.
+
+If a server's config references env vars (like `agentmemory`'s `AGENTMEMORY_URL`/`AGENTMEMORY_SECRET`), those are **not** forwarded automatically. Name them explicitly with `MCP_SERVER_ENV`:
+
+```sh
+MCP_SERVERS=agentmemory MCP_SERVER_ENV="AGENTMEMORY_URL AGENTMEMORY_SECRET" claude-pod
+```
+
+Only the exact vars you list cross into the container (same pass-through style as `COLORTERM`). Nothing is auto-detected from a server's config — a credential only ends up in the sandbox if you name it, since anything forwarded here becomes reachable from code running under `--dangerously-skip-permissions`.
+
+This covers locally-configured MCP servers only (your `~/.claude.json`'s `mcpServers` object). claude.ai account connectors (Linear, Notion, Asana, etc.) are a separate mechanism and aren't covered here.
+
 ### Pasting images and screenshots
 
 Claude can only read files that live **inside the project folder** — that's the one directory bind-mounted into the container. Images on your Desktop or in Downloads aren't mounted, so pasting one straight from there hands Claude a path it can't reach. This is the same isolation that keeps the rest of your machine private from the container ([What is and isn't isolated](#what-is-and-isnt-isolated)); the small bit of friction below is the price for not exposing those default locations.
@@ -201,7 +233,7 @@ Pinned versions cache normally across rebuilds. The script prints the resolved v
 
 ### Customizing the image
 
-The image is intentionally minimal: `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + Claude Code. Nothing language-specific. Anything your projects need (Python, build tools, other toolchains) you add yourself — edit the `Dockerfile` and re-run `~/tools/claude-pod/install.sh`.
+The image is intentionally minimal: `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + Claude Code, plus `@colbymchenry/codegraph` (this fork's one personal addition — see [CLAUDE.md](CLAUDE.md)). Nothing else language-specific. Anything your projects need (Python, build tools, other toolchains), or another [MCP server](#mcp-servers)'s underlying command, you add yourself — edit the `Dockerfile` and re-run `~/tools/claude-pod/install.sh`.
 
 ## Security and limits
 
@@ -272,7 +304,7 @@ Everything this repo causes to exist outside the project you launch it from:
 - Outbound network during build: Docker Hub, Debian apt mirrors, npm registry. During runtime: `api.anthropic.com` and whatever your project code reaches (network is unrestricted).
 - While a session is running: one container process, and any ports you explicitly mapped via `PORTS` bound on `127.0.0.1`.
 
-No `sudo`, no writes to `/usr/local/`, `/etc/`, `~/.zshrc`, `~/Library/`, or anywhere else on the host. Your existing `~/.claude/` (skills, plugins, `CLAUDE.md`, `settings.json`, `statusline.sh`) and `~/.agents` are read from by default, but never written to — see [Claude config access](#claude-config-access).
+No `sudo`, no writes to `/usr/local/`, `/etc/`, `~/.zshrc`, `~/Library/`, or anywhere else on the host. Your existing `~/.claude/` (skills, plugins, `CLAUDE.md`, `settings.json`, `statusline.sh`) and `~/.agents` are read from by default, but never written to — see [Claude config access](#claude-config-access). Your host's `~/.claude.json` is also read from by default (never written to), and `~/.claude-pod/.claude.json`'s `mcpServers` key is rewritten every run to match — see [MCP servers](#mcp-servers).
 
 ## Reference
 

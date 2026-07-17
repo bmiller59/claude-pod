@@ -25,9 +25,10 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   row "Publish ports:"  "PORTS=\"3000 5173\" $HERE/claude-pod"
   row "Isolate/limit:"  "NET=none MEMORY=4g PIDS=512 $HERE/claude-pod"
   row "Reach host services:" "HOST_SERVICES=1 $HERE/claude-pod"
+  row "Whitelist MCP servers:" "MCP_SERVERS=codegraph $HERE/claude-pod (default; MCP_SERVERS=none to disable)"
   printf '\n'
   row "Shortcut alias:" "alias claude-pod=$HERE/claude-pod"
-  row "Full README:"    "https://github.com/trekhleb/claude-pod"
+  row "Full README:"    "https://github.com/bmiller59/claude-pod"
   exit 0
 fi
 
@@ -178,6 +179,69 @@ CLAUDE_HOME_PATHS=(
 for _claude_home_rel in "${CLAUDE_HOME_PATHS[@]}"; do
   [ -e "$HOME/$_claude_home_rel" ] && DOCKER_FLAGS+=("-v" "$HOME/$_claude_home_rel:/home/claude-pod/$_claude_home_rel:ro")
 done
+
+# Optional MCP Server Whitelist:
+#   Defaults to "codegraph" -- this fork's one personal default (see CLAUDE.md), since it's used
+#   constantly here. Override with MCP_SERVERS="codegraph agentmemory" (replaces the default
+#   entirely -- include "codegraph" yourself if you still want it alongside others), or disable
+#   with MCP_SERVERS=none. The default only applies when the var is completely unset (`${VAR-x}`,
+#   no colon) so MCP_SERVERS="" also means "nothing", same as MCP_SERVERS=none.
+#   Copies just the named entries out of the host's real ~/.claude.json (top-level mcpServers
+#   object -- a file this tool otherwise never touches) and replaces the mcpServers key in the
+#   pod's own ~/.claude-pod/.claude.json with exactly that set. This is a rewrite of the pod's live
+#   config file, not a bind mount: Claude Code writes to this file routinely (project trust,
+#   session state), so it has to stay writable, and there's no way to bind-mount "just one key" of
+#   a JSON file.
+#   Full replace, every run, including when the resolved list is empty: a server whitelisted on an
+#   earlier run must NOT stay active on a later run that no longer asks for it -- the sync step
+#   below always runs, not just when the list is non-empty, specifically to clear that case.
+#   Requires jq on the host, but only enforced when the resolved list is non-empty (checked here,
+#   not at the top) -- this is the one case where "Docker is the only requirement" gets a footnote.
+#   If a host has never used this feature and has no jq, the sync step below silently no-ops
+#   instead of erroring, since there's nothing to clear.
+#   A server's underlying command must already exist in the image (e.g. `codegraph`, added to the
+#   Dockerfile) or the MCP connection will simply fail to start inside the pod; this script doesn't
+#   install anything.
+#   Secrets referenced by a whitelisted server's env config (e.g. an API token) are NOT forwarded
+#   automatically -- see MCP_SERVER_ENV below. Auto-detecting and forwarding them would expose a
+#   credential to the sandbox by surprise.
+MCP_SERVERS="${MCP_SERVERS-codegraph}"
+[ "$MCP_SERVERS" = "none" ] && MCP_SERVERS=""
+
+MCP_MERGED='{}'
+if [ -n "${MCP_SERVERS:-}" ]; then
+  command -v jq >/dev/null || die "MCP_SERVERS requires jq on the host (e.g. 'brew install jq' or 'apt-get install jq')."
+  [ -f "$HOME/.claude.json" ] || die "MCP_SERVERS is set but $HOME/.claude.json doesn't exist -- no MCP servers are configured on this host."
+
+  for _mcp_name in $MCP_SERVERS; do
+    _mcp_entry="$(jq -c --arg n "$_mcp_name" '.mcpServers[$n] // empty' "$HOME/.claude.json")"
+    [ -n "$_mcp_entry" ] || die "MCP_SERVERS entry '$_mcp_name' not found in ~/.claude.json's mcpServers."
+    MCP_MERGED="$(jq -cn --argjson obj "$MCP_MERGED" --arg n "$_mcp_name" --argjson e "$_mcp_entry" '$obj + {($n): $e}')"
+  done
+fi
+
+# Always sync (not just when MCP_SERVERS is set) -- see comment above. Best-effort when jq isn't
+# on PATH: a host that has never used MCP_SERVERS has nothing to clear, so silently skip rather
+# than newly requiring jq on every run.
+if command -v jq >/dev/null 2>&1; then
+  # Rewrite-then-chmod: jq's output redirection creates a new inode at the default umask, which
+  # would silently regress this file back to world-readable -- it carries account/session state.
+  jq --argjson mcp "$MCP_MERGED" '.mcpServers = $mcp' "$HOME/.claude-pod/.claude.json" > "$HOME/.claude-pod/.claude.json.tmp" \
+    && mv "$HOME/.claude-pod/.claude.json.tmp" "$HOME/.claude-pod/.claude.json"
+  chmod 600 "$HOME/.claude-pod/.claude.json"
+fi
+
+# Optional MCP Server Env Passthrough:
+#   Off by default. MCP_SERVER_ENV="AGENTMEMORY_SECRET" forwards exactly the named host env vars
+#   into the container (bare `-e NAME`, same pass-through style as COLORTERM below) -- for MCP
+#   servers whose config (see MCP_SERVERS above) references them, e.g. agentmemory's
+#   AGENTMEMORY_URL/AGENTMEMORY_SECRET. You name exactly which vars cross into the sandbox; nothing
+#   is inferred from a server's config, so a credential never ends up in the container by surprise.
+if [ -n "${MCP_SERVER_ENV:-}" ]; then
+  for _mcp_env_var in $MCP_SERVER_ENV; do
+    DOCKER_FLAGS+=("-e" "$_mcp_env_var")
+  done
+fi
 
 # Hardening:
 #   --cap-drop=ALL                       Drop all Linux capabilities. An interactive dev shell
