@@ -25,8 +25,8 @@ RUN npm install -g @colbymchenry/codegraph
 
 # Happy Coder CLI (https://happy.engineering, https://github.com/slopus/happy-cli): an optional
 # wrapper around `claude` that adds mobile/web session pairing. Installs the `happy` binary.
-# Invoked as `claude-pod happy --claude-arg <arg>` instead of `claude-pod claude <arg>` -- see the
-# claude-pod script's HAPPY_HOME_DIR handling for its state dir.
+# Invoked as `claude-pod happy <arg>` instead of `claude-pod claude <arg>` -- Happy passes Claude
+# flags straight through. See the claude-pod script's HAPPY_HOME_DIR handling for its state dir.
 RUN npm install -g happy-coder
 
 # We DO NOT use `USER node` here. Instead, we pass `--user "$(id -u):$(id -g)"` dynamically
@@ -114,7 +114,8 @@ user exactly what to run and let them do it themselves.
 - The codegraph MCP server is available by default (see `MCP_SERVERS` in the
   `claude-pod` script) when a project has a `.codegraph/` index.
 - `happy` (Happy Coder CLI) is available as an alternative way to start a session --
-  `happy --claude-arg <arg>` instead of `claude <arg>` -- for mobile/web session pairing.
+  `happy <arg>` instead of `claude <arg>` (Claude flags pass straight through) -- for
+  mobile/web session pairing.
 
 ## Isolation
 Only the project directory the pod was launched from (mounted at the same path as

@@ -112,16 +112,16 @@ This is the shell-first form: `claude-pod` drops you into the container with `cl
 
 ### Running Happy Coder
 
-[Happy Coder](https://happy.engineering) (`happy`) is baked into the image as an alternative front-end for Claude Code — it adds encrypted mobile/web session pairing on top of the same underlying `claude` process. Use `--claude-arg` to forward flags through to `claude` itself:
+[Happy Coder](https://happy.engineering) (`happy`) is baked into the image as an alternative front-end for Claude Code — it adds encrypted mobile/web session pairing on top of the same underlying `claude` process. Happy passes Claude flags straight through, so use them exactly as you would with `claude` itself:
 
 ```sh
-claude-pod happy --claude-arg --dangerously-skip-permissions
+claude-pod happy --dangerously-skip-permissions
 ```
 
 Happy keeps its own state (auth/session data for the pairing) under `HAPPY_HOME_DIR` (default `~/.happy`) — that's Happy's own env var, not something `claude-pod` invented, so it works the same whether you run `happy` directly on your host or through the pod. This is the one state dir in this project that **isn't** pod-exclusive by default: if you also run `happy` natively on your host, the pod shares that same `~/.happy` directory (read-write) rather than getting a separate copy the way `~/.claude-pod` does for Claude's own login. If you'd rather keep the pod's Happy state separate, point it at its own directory:
 
 ```sh
-HAPPY_HOME_DIR=~/.happy-pod claude-pod happy --claude-arg --dangerously-skip-permissions
+HAPPY_HOME_DIR=~/.happy-pod claude-pod happy --dangerously-skip-permissions
 ```
 
 Because the default isn't pod-exclusive, `uninstall.sh` deliberately does **not** remove `~/.happy` (or a custom `HAPPY_HOME_DIR`) — doing so could delete real host-side Happy state. Clean that up yourself if you used a dedicated directory and no longer need it.

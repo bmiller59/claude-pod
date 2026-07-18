@@ -17,7 +17,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   printf '\n%sRun%s  (cd into your project first — the current folder is what gets mounted):\n' "$BOLD" "$RESET"
   row "Open a shell:"   "$HERE/claude-pod"
   row "Run Claude:"     "$HERE/claude-pod claude --dangerously-skip-permissions"
-  row "Run via Happy:"  "$HERE/claude-pod happy --claude-arg --dangerously-skip-permissions"
+  row "Run via Happy:"  "$HERE/claude-pod happy --dangerously-skip-permissions"
   printf '\n%sManage%s  (works from any folder):\n' "$BOLD" "$RESET"
   row "Install/update:" "$HERE/install.sh"
   row "Pin a version:"  "CLAUDE_CODE_VERSION=2.0.0 $HERE/install.sh"
@@ -25,6 +25,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   printf '\n%sOptions%s  (prefix any run command):\n' "$BOLD" "$RESET"
   row "Publish ports:"  "PORTS=\"3000 5173\" $HERE/claude-pod"
   row "Isolate/limit:"  "NET=none MEMORY=4g CPUS=2 PIDS=512 $HERE/claude-pod"
+  row "Name for Happy:" "HAPPY_MACHINE_NAME=tessero $HERE/claude-pod (stable machine name in the mobile app; default: random per-container)"
   row "Reach host services:" "HOST_SERVICES=1 $HERE/claude-pod"
   row "  ...specific ports:" "HOST_SERVICES=\"27017 8000\" $HERE/claude-pod (transparent localhost proxy, scoped to just those ports)"
   row "Whitelist MCP servers:" "MCP_SERVERS=codegraph $HERE/claude-pod (default; MCP_SERVERS=none to disable)"
@@ -76,8 +77,9 @@ chmod 700 "$POD_HOME"
 chmod 600 "$POD_HOME/.claude.json"
 
 # Happy Coder CLI (https://happy.engineering) is baked into the image as an optional way to run
-# Claude -- `claude-pod happy --claude-arg --dangerously-skip-permissions` instead of `claude-pod
-# claude --dangerously-skip-permissions`. It keeps its own state (auth/session data for the mobile
+# Claude -- `claude-pod happy --dangerously-skip-permissions` instead of `claude-pod
+# claude --dangerously-skip-permissions`. Happy passes Claude flags straight through (no wrapper
+# flag needed). It keeps its own state (auth/session data for the mobile
 # pairing) under HAPPY_HOME_DIR -- that's Happy's own env var, default $HOME/.happy, not one we
 # invented, so it behaves the same whether `happy` is run directly on the host or via claude-pod.
 # Unlike CLAUDE_POD_HOME, this default is NOT pod-exclusive: if you also run `happy` on the host,
@@ -195,6 +197,21 @@ fi
 DOCKER_FLAGS+=("--pids-limit=${PIDS:-4096}")
 [ -n "${MEMORY:-}" ] && DOCKER_FLAGS+=("--memory=$MEMORY")
 [ -n "${CPUS:-}" ]   && DOCKER_FLAGS+=("--cpus=$CPUS")
+
+# Optional container hostname override, e.g. for Happy Coder's mobile session list:
+#   Happy identifies a "machine" by the container's os.hostname() (confirmed by reading
+#   happy-coder's bundled source -- there is no dedicated env var for this in the package itself).
+#   Without an override, Docker assigns a random hostname per container, so every restart of a
+#   long-running `happy` pod (e.g. under systemd) shows up as a brand-new, differently-named
+#   machine in the app instead of a stable one. Set HAPPY_MACHINE_NAME to pin it -- most useful
+#   when running several accounts in parallel (see CLAUDE_CONFIG_DIR below), one distinct name each.
+#   Also used as the container's --name (Docker enforces name uniqueness host-wide): this lets a
+#   systemd unit target the exact container with `docker stop <name>` in ExecStop, instead of
+#   relying on SIGTERM propagating down through this script's process chain to the `docker run`
+#   client -- which in testing did not reliably stop an -it (pty-attached) container, leaving a
+#   stale duplicate running after `systemctl restart`. A stuck old container now fails loudly (Docker
+#   refuses to reuse a name that's still running) instead of silently doubling up.
+[ -n "${HAPPY_MACHINE_NAME:-}" ] && DOCKER_FLAGS+=("--hostname" "$HAPPY_MACHINE_NAME" "--name" "$HAPPY_MACHINE_NAME")
 
 # Optional Claude Config Access (skills, plugins, global instructions):
 #   On by default. Bind-mounts a curated, read-only subset of the host's ~/.claude/ (plus
