@@ -24,7 +24,8 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   printf '\n%sOptions%s  (prefix any run command):\n' "$BOLD" "$RESET"
   row "Publish ports:"  "PORTS=\"3000 5173\" $HERE/claude-pod"
   row "Isolate/limit:"  "NET=none MEMORY=4g CPUS=2 PIDS=512 $HERE/claude-pod"
-  row "Reach host services:" "HOST_SERVICES=1 $HERE/claude-pod (or HOST_SERVICES=\"27017 8000\" to proxy those ports onto localhost)"
+  row "Reach host services:" "HOST_SERVICES=1 $HERE/claude-pod"
+  row "  ...specific ports:" "HOST_SERVICES=\"27017 8000\" $HERE/claude-pod (transparent localhost proxy, scoped to just those ports)"
   row "Whitelist MCP servers:" "MCP_SERVERS=codegraph $HERE/claude-pod (default; MCP_SERVERS=none to disable)"
   row "Forward MCP secrets:" "MCP_SERVER_ENV=AGENTMEMORY_SECRET $HERE/claude-pod"
   printf '\n'
