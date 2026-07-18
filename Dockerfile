@@ -65,6 +65,42 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 EOF
 
+# Managed-policy CLAUDE.md: Claude Code loads a fixed system path (this one, on Linux) before the
+# user's own ~/.claude/CLAUDE.md and any project CLAUDE.md, and concatenates rather than overrides --
+# so this applies additively to every project run in the pod, without editing anyone's host CLAUDE.md
+# (which is bind-mounted read-only from the host, so we couldn't safely rewrite it here anyway) and
+# without depending on a project remembering to @import it. It also can't be excluded the way a
+# project/user CLAUDE.md can via claudeMdExcludes.
+RUN mkdir -p /etc/claude-code && cat > /etc/claude-code/CLAUDE.md <<'EOF'
+# claude-pod sandbox
+
+Every Claude Code session inside a `claude-pod` container loads this file from
+`/etc/claude-code/CLAUDE.md` (Claude Code's managed-policy location) in addition to
+the project's own CLAUDE.md and the user's `~/.claude/CLAUDE.md` -- it doesn't replace
+either.
+
+## No git/GitHub push credentials
+No SSH keys, git credential helper, or `gh` auth token are mounted into the container.
+`git push` and any `gh` command needing authentication (`gh pr create`, `gh issue
+comment`, etc.) will fail here. Don't attempt them -- tell the user what to run and
+let them do it from the host.
+
+## Tools baked into the image
+- git, curl, less, jq, gh, socat, node/npm -- all on PATH already.
+- nvm is installed at `$NVM_DIR` (`$HOME/.nvm`) to switch Node versions. It's loaded
+  automatically in interactive bash shells; in a non-interactive `claude-pod claude ...`
+  run, source it first: `. "$NVM_DIR/nvm.sh" && nvm use <version>`.
+- The codegraph MCP server is available by default (see `MCP_SERVERS` in the
+  `claude-pod` script) when a project has a `.codegraph/` index.
+
+## Isolation
+Only the project directory the pod was launched from (mounted at the same path as
+the host) and the pod's own `~/.claude` state are visible. Other host paths and other
+projects are not reachable. If the run was started with `NET=none`, there is no
+network at all -- not even to api.anthropic.com -- so that mode is for offline
+shell/build work, not a live Claude session.
+EOF
+
 # Entrypoint: proxies named host ports onto the container's own loopback before running the real
 # command, so `claude-pod`'s HOST_SERVICES=<ports> option (see the `claude-pod` script) lets test
 # config keep pointing at `localhost:<port>` unchanged whether running in the pod or not, instead
