@@ -90,12 +90,12 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/code/<id>
+WorkingDirectory=<project folder chosen in Step 0 -- NOT necessarily %h/code/<id>>
 Environment=CLAUDE_CONFIG_DIR=%h/.claude-<id>
 Environment=CLAUDE_POD_HOME=%h/.claude-pod-<id>
 Environment=HAPPY_HOME_DIR=%h/.happy-<id>
 Environment=HAPPY_MACHINE_NAME=<id>
-ExecStart=/usr/bin/script -qec "%h/path/to/claude-pod happy --dangerously-skip-permissions" /dev/null
+ExecStart=/usr/bin/script -qec "%h/path/to/claude-pod happy" /dev/null
 ExecStop=-/usr/bin/docker stop <id>
 Restart=always
 RestartSec=5
@@ -106,7 +106,13 @@ StandardError=append:%h/.happy-logs/<id>.log
 WantedBy=default.target
 ```
 
-Two details that are easy to "simplify away" and shouldn't be:
+Append ` --dangerously-skip-permissions` inside the quoted `script` command
+only for accounts that chose bypass mode in Step 0 — for manual-approval
+accounts, leave it off and confirm during Step 6 that permission prompts
+actually surface somewhere reachable (mobile app) instead of hanging the
+service with no way to respond; this combination is untested as of writing.
+
+Three details that are easy to "simplify away" and shouldn't be:
 
 1. **`After=network-online.target` only — deliberately no
    `Requires=docker.service`/`After=docker.service`.** A `systemctl --user`
@@ -171,7 +177,8 @@ done
 **7.4 Mobile app session list** — manual: open Happy Coder, confirm one
 entry per account, each correctly labeled by `HAPPY_MACHINE_NAME`. Send a
 trivial prompt to each from the phone and confirm the response references
-the right `~/code/<id>` path.
+that account's actual project folder (the one chosen in Step 0), not
+another account's.
 
 **7.5 Persistence across restart**
 ```bash
