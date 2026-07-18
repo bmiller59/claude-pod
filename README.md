@@ -243,7 +243,7 @@ Pinned versions cache normally across rebuilds. The script prints the resolved v
 
 ### Customizing the image
 
-The image is intentionally minimal: `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + Claude Code, plus `@colbymchenry/codegraph` (this fork's one personal addition — see [CLAUDE.md](CLAUDE.md)). Nothing else language-specific. Anything your projects need (Python, build tools, other toolchains), or another [MCP server](#mcp-servers)'s underlying command, you add yourself — edit the `Dockerfile` and re-run `~/tools/claude-pod/install.sh`.
+The image is intentionally minimal: `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + Claude Code, plus `@colbymchenry/codegraph` and `nvm` (this fork's personal additions — see [CLAUDE.md](CLAUDE.md)). Nothing else language-specific. Anything your projects need (Python, build tools, other toolchains), or another [MCP server](#mcp-servers)'s underlying command, you add yourself — edit the `Dockerfile` and re-run `~/tools/claude-pod/install.sh`.
 
 ## Security and limits
 

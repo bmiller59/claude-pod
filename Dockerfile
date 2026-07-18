@@ -29,6 +29,18 @@ RUN npm install -g @colbymchenry/codegraph
 # Create a dedicated, globally writable home directory for our dynamic runtime user.
 RUN mkdir -p /home/claude-pod && chmod 777 /home/claude-pod
 
+# nvm, installed under the dynamic user's home dir so it's writable at runtime (the container
+# always runs with HOME=/home/claude-pod, set by the `claude-pod` script, regardless of which
+# host uid/gid is mapped in). PROFILE=/dev/null stops the installer from appending its loader
+# line to a build-time root shell rc that the runtime user will never read -- we add that line
+# ourselves to /etc/bash.bashrc below instead, next to the rest of the interactive-shell setup.
+# chmod -R 777 mirrors the home dir above: the runtime user has no fixed uid/gid, so nvm's own
+# files (installed here as root) need to be world-writable for `nvm install <version>` to work.
+RUN export NVM_DIR=/home/claude-pod/.nvm \
+ && mkdir -p "$NVM_DIR" \
+ && curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.6/install.sh | PROFILE=/dev/null bash \
+ && chmod -R 777 "$NVM_DIR"
+
 # Interactive-shell setup, appended to /etc/bash.bashrc. Only interactive bash sources this file, so
 # none of it touches the non-interactive `claude-pod claude ...` path. The dynamic, /etc/passwd-less
 # user has no $HOME/.bashrc of its own, so these baseline conveniences have to live in the system-wide
@@ -46,6 +58,11 @@ PS1='\[\e[1;32m\]claude-pod\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\$ '
 if command -v dircolors >/dev/null 2>&1; then eval "$(dircolors -b)"; fi
 alias ls='ls --color=auto'
 alias grep='grep --color=auto'
+
+# nvm's standard loader snippet (nvm itself is installed above, under $HOME/.nvm).
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 EOF
 
 # Entrypoint: proxies named host ports onto the container's own loopback before running the real
