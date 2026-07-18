@@ -28,6 +28,8 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   row "  ...specific ports:" "HOST_SERVICES=\"27017 8000\" $HERE/claude-pod (transparent localhost proxy, scoped to just those ports)"
   row "Whitelist MCP servers:" "MCP_SERVERS=codegraph $HERE/claude-pod (default; MCP_SERVERS=none to disable)"
   row "Forward MCP secrets:" "MCP_SERVER_ENV=AGENTMEMORY_SECRET $HERE/claude-pod"
+  row "Custom config dir:" "CLAUDE_CONFIG_DIR=~/.claude-tessero $HERE/claude-pod (default ~/.claude; same var Claude Code itself uses)"
+  row "Custom state dir:" "CLAUDE_POD_HOME=~/.claude-pod-tessero $HERE/claude-pod (default ~/.claude-pod; pair with CLAUDE_CONFIG_DIR for parallel accounts)"
   printf '\n'
   row "Shortcut alias:" "alias claude-pod=$HERE/claude-pod"
   row "Full README:"    "https://github.com/bmiller59/claude-pod"
@@ -50,21 +52,26 @@ if [ -z "$(docker image ls -q claude-pod 2>/dev/null)" ]; then
 fi
 
 # Host-side state dir: persists Claude's auth + history across container restarts.
-mkdir -p "$HOME/.claude-pod"
+# Overridable via CLAUDE_POD_HOME (default $HOME/.claude-pod) so you can run multiple pods in
+# parallel -- e.g. logged into different Claude accounts -- without them sharing auth/session
+# state. Pair it with CLAUDE_CONFIG_DIR (see below) using a matching suffix, e.g.
+# CLAUDE_CONFIG_DIR=~/.claude-tessero CLAUDE_POD_HOME=~/.claude-pod-tessero.
+POD_HOME="${CLAUDE_POD_HOME:-$HOME/.claude-pod}"
+mkdir -p "$POD_HOME"
 
 # Claude reads its main config from $HOME/.claude.json (a file at HOME, sibling to the .claude/
 # directory). We bind-mount this file separately so login state survives. Two quirks:
 #   - Docker creates a directory at the target if the source path is missing, so the file must
 #     pre-exist on the host before `docker run`.
 #   - Claude treats an empty file as a JSON parse error, not as "no config", so we seed it with {}.
-[ -s "$HOME/.claude-pod/.claude.json" ] || printf '{}' > "$HOME/.claude-pod/.claude.json"
+[ -s "$POD_HOME/.claude.json" ] || printf '{}' > "$POD_HOME/.claude.json"
 
 # Restrict to owner-only. The directory holds the Anthropic auth token and session transcripts
 # (which can contain code, file contents, and command output Claude saw); on multi-user hosts the
 # default 755/644 modes would let other local users read both. Matches the convention used for
 # ~/.ssh, ~/.aws, ~/.gnupg.
-chmod 700 "$HOME/.claude-pod"
-chmod 600 "$HOME/.claude-pod/.claude.json"
+chmod 700 "$POD_HOME"
+chmod 600 "$POD_HOME/.claude.json"
 
 # Mounts & Users:
 #   --user -> dynamic                            Runs container exactly as the host user to prevent permission issues.
@@ -72,8 +79,9 @@ chmod 600 "$HOME/.claude-pod/.claude.json"
 #   $PWD -> $PWD                                 project files; same path on both sides keeps file
 #                                                references (logs, errors, tool output) consistent
 #                                                between host and container.
-#   ~/.claude-pod -> /home/claude-pod/.claude    credentials, sessions, history (the .claude dir).
-#   ~/.claude-pod/.claude.json -> ditto          account binding + project trust state (sibling file).
+#   $POD_HOME -> /home/claude-pod/.claude        credentials, sessions, history (the .claude dir).
+#                                                default ~/.claude-pod; override with CLAUDE_POD_HOME.
+#   $POD_HOME/.claude.json -> ditto              account binding + project trust state (sibling file).
 # TTY Detection:
 #   If we pipe data into the script (e.g. `cat file | claude-pod`), input is not a terminal.
 #   Passing `-t` to Docker in this case would cause a crash.
@@ -180,23 +188,24 @@ DOCKER_FLAGS+=("--pids-limit=${PIDS:-4096}")
 #   history.jsonl, and projects/ (session transcripts from every OTHER project you've used Claude
 #   Code on), which would blow a hole in "other projects are unreachable" (see README's Security
 #   and limits).
+#   Source dir is overridable via CLAUDE_CONFIG_DIR (default $HOME/.claude), matching upstream
+#   Claude Code's own env var of the same name/semantics -- if you already use it to switch
+#   accounts on the host (e.g. CLAUDE_CONFIG_DIR=~/.claude-tessero), the same value works here.
+#   ~/.agents is NOT part of this override: it's a skill-manager symlink target unrelated to which
+#   Claude account/profile is active, so it always comes from $HOME regardless of CLAUDE_CONFIG_DIR.
 #   Each path is mounted only if it exists on the host. This matters, not just tidiness: Docker's
 #   bind mount auto-creates the *target* path when the *source* is missing, and since source and
 #   target share the same relative path here, an unconditional mount would silently create an
-#   empty file/directory inside the user's real ~/.claude or ~/.agents the first time this ran
+#   empty file/directory inside the user's real config dir or ~/.agents the first time this ran
 #   without one of these paths present -- mutating host state, which this tool otherwise never
 #   does.
-CLAUDE_HOME_PATHS=(
-  ".claude/skills"
-  ".agents"
-  ".claude/plugins"
-  ".claude/CLAUDE.md"
-  ".claude/settings.json"
-  ".claude/statusline.sh"
-)
-for _claude_home_rel in "${CLAUDE_HOME_PATHS[@]}"; do
-  [ -e "$HOME/$_claude_home_rel" ] && DOCKER_FLAGS+=("-v" "$HOME/$_claude_home_rel:/home/claude-pod/$_claude_home_rel:ro")
+CLAUDE_SRC_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+[ -n "${CLAUDE_CONFIG_DIR:-}" ] && [ ! -d "$CLAUDE_CONFIG_DIR" ] && die "CLAUDE_CONFIG_DIR '$CLAUDE_CONFIG_DIR' does not exist or is not a directory."
+CLAUDE_HOME_ITEMS=(skills plugins CLAUDE.md settings.json statusline.sh)
+for _claude_home_item in "${CLAUDE_HOME_ITEMS[@]}"; do
+  [ -e "$CLAUDE_SRC_DIR/$_claude_home_item" ] && DOCKER_FLAGS+=("-v" "$CLAUDE_SRC_DIR/$_claude_home_item:/home/claude-pod/.claude/$_claude_home_item:ro")
 done
+[ -e "$HOME/.agents" ] && DOCKER_FLAGS+=("-v" "$HOME/.agents:/home/claude-pod/.agents:ro")
 
 # Optional MCP Server Whitelist:
 #   Defaults to "codegraph" -- this fork's one personal default (see CLAUDE.md), since it's used
@@ -206,10 +215,14 @@ done
 #   no colon) so MCP_SERVERS="" also means "nothing", same as MCP_SERVERS=none.
 #   Copies just the named entries out of the host's real ~/.claude.json (top-level mcpServers
 #   object -- a file this tool otherwise never touches) and replaces the mcpServers key in the
-#   pod's own ~/.claude-pod/.claude.json with exactly that set. This is a rewrite of the pod's live
+#   pod's own $POD_HOME/.claude.json with exactly that set. This is a rewrite of the pod's live
 #   config file, not a bind mount: Claude Code writes to this file routinely (project trust,
 #   session state), so it has to stay writable, and there's no way to bind-mount "just one key" of
 #   a JSON file.
+#   Reads from $CLAUDE_CONFIG_DIR/.claude.json when CLAUDE_CONFIG_DIR is set, matching upstream
+#   Claude Code's own behavior of relocating .claude.json inside a custom config dir (confirmed by
+#   inspecting an actual profile dir; not documented upstream). Falls back to $HOME/.claude.json
+#   otherwise. This makes MCP whitelisting automatically per-profile, same as skills/plugins/etc.
 #   Full replace, every run, including when the resolved list is empty: a server whitelisted on an
 #   earlier run must NOT stay active on a later run that no longer asks for it -- the sync step
 #   below always runs, not just when the list is non-empty, specifically to clear that case.
@@ -226,14 +239,17 @@ done
 MCP_SERVERS="${MCP_SERVERS-codegraph}"
 [ "$MCP_SERVERS" = "none" ] && MCP_SERVERS=""
 
+CLAUDE_JSON="$HOME/.claude.json"
+[ -n "${CLAUDE_CONFIG_DIR:-}" ] && CLAUDE_JSON="$CLAUDE_CONFIG_DIR/.claude.json"
+
 MCP_MERGED='{}'
 if [ -n "${MCP_SERVERS:-}" ]; then
   command -v jq >/dev/null || die "MCP_SERVERS requires jq on the host (e.g. 'brew install jq' or 'apt-get install jq')."
-  [ -f "$HOME/.claude.json" ] || die "MCP_SERVERS is set but $HOME/.claude.json doesn't exist -- no MCP servers are configured on this host."
+  [ -f "$CLAUDE_JSON" ] || die "MCP_SERVERS is set but $CLAUDE_JSON doesn't exist -- no MCP servers are configured for this profile."
 
   for _mcp_name in $MCP_SERVERS; do
-    _mcp_entry="$(jq -c --arg n "$_mcp_name" '.mcpServers[$n] // empty' "$HOME/.claude.json")"
-    [ -n "$_mcp_entry" ] || die "MCP_SERVERS entry '$_mcp_name' not found in ~/.claude.json's mcpServers."
+    _mcp_entry="$(jq -c --arg n "$_mcp_name" '.mcpServers[$n] // empty' "$CLAUDE_JSON")"
+    [ -n "$_mcp_entry" ] || die "MCP_SERVERS entry '$_mcp_name' not found in $CLAUDE_JSON's mcpServers."
     MCP_MERGED="$(jq -cn --argjson obj "$MCP_MERGED" --arg n "$_mcp_name" --argjson e "$_mcp_entry" '$obj + {($n): $e}')"
   done
 fi
@@ -244,9 +260,9 @@ fi
 if command -v jq >/dev/null 2>&1; then
   # Rewrite-then-chmod: jq's output redirection creates a new inode at the default umask, which
   # would silently regress this file back to world-readable -- it carries account/session state.
-  jq --argjson mcp "$MCP_MERGED" '.mcpServers = $mcp' "$HOME/.claude-pod/.claude.json" > "$HOME/.claude-pod/.claude.json.tmp" \
-    && mv "$HOME/.claude-pod/.claude.json.tmp" "$HOME/.claude-pod/.claude.json"
-  chmod 600 "$HOME/.claude-pod/.claude.json"
+  jq --argjson mcp "$MCP_MERGED" '.mcpServers = $mcp' "$POD_HOME/.claude.json" > "$POD_HOME/.claude.json.tmp" \
+    && mv "$POD_HOME/.claude.json.tmp" "$POD_HOME/.claude.json"
+  chmod 600 "$POD_HOME/.claude.json"
 fi
 
 # Optional MCP Server Env Passthrough:
@@ -283,6 +299,6 @@ exec docker run "${DOCKER_FLAGS[@]}" \
   -e COLORTERM \
   -v "$PWD:$PWD" \
   -w "$PWD" \
-  -v "$HOME/.claude-pod:/home/claude-pod/.claude" \
-  -v "$HOME/.claude-pod/.claude.json:/home/claude-pod/.claude.json" \
+  -v "$POD_HOME:/home/claude-pod/.claude" \
+  -v "$POD_HOME/.claude.json:/home/claude-pod/.claude.json" \
   claude-pod "$@"

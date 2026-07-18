@@ -52,6 +52,7 @@ Docker is the only requirement — no Node.js, npm, or `claude` needed on your h
   - [First launch (login)](#first-launch-login)
   - [Exposing ports](#exposing-ports)
   - [Claude config access](#claude-config-access)
+  - [Multiple accounts / profiles](#multiple-accounts--profiles)
   - [Reaching host services](#reaching-host-services)
   - [MCP servers](#mcp-servers)
   - [Pasting images and screenshots](#pasting-images-and-screenshots)
@@ -71,7 +72,7 @@ Docker is the only requirement — no Node.js, npm, or `claude` needed on your h
 
 ### Requirements
 
-**Just Docker.** Claude Code runs inside the container, not on your host — you do not need Node.js, npm, or the `claude` CLI installed on your machine. The host stays untouched apart from one state folder (`~/.claude-pod/`) that exists only to keep your login across container restarts.
+**Just Docker.** Claude Code runs inside the container, not on your host — you do not need Node.js, npm, or the `claude` CLI installed on your machine. The host stays untouched apart from one state folder (`~/.claude-pod/`, overridable — see [Multiple accounts / profiles](#multiple-accounts--profiles)) that exists only to keep your login across container restarts.
 
 ### Running claude-pod
 
@@ -110,7 +111,7 @@ This is the shell-first form: `claude-pod` drops you into the container with `cl
 
 ### First launch (login)
 
-The first time you start Claude inside the pod, it will print a login URL. Open it in your host browser, complete the login, paste the verification code back into the container, and you're done. The session persists in `~/.claude-pod/` and survives container restarts — you only do this once per machine.
+The first time you start Claude inside the pod, it will print a login URL. Open it in your host browser, complete the login, paste the verification code back into the container, and you're done. The session persists in `~/.claude-pod/` (or `CLAUDE_POD_HOME` if set — see [Multiple accounts / profiles](#multiple-accounts--profiles)) and survives container restarts — you only do this once per machine (per state dir).
 
 ### Exposing ports
 
@@ -156,6 +157,27 @@ This is deliberately **not** the whole `~/.claude/` directory: your `.credential
 If your `settings.json` references a hook or `statusLine.command` pointing somewhere other than the paths above, that reference will fail inside the pod (file not found) — only the paths listed here are mounted.
 
 > **Project-scoped plugins won't activate inside the pod — only user-scoped ones will.** Run `claude plugin list` (or check `~/.claude/plugins/installed_plugins.json`) on your host: plugins installed at `"scope": "user"` show up inside the pod, but a plugin installed at `"scope": "project"` (pinned to one project path) does not, even though its skill files are mounted and readable. That's because project-scope activation is resolved through your host's real `~/.claude.json` (a file sibling to `~/.claude/`, holding trust/config state for *every* project you've used Claude Code in), which the pod intentionally does not mount — mounting it would undo "other projects are unreachable" above. If a plugin you rely on inside the pod is project-scoped, reinstall it at user scope on your host.
+
+The source directory for all of this defaults to `~/.claude` but is overridable with `CLAUDE_CONFIG_DIR` — see [Multiple accounts / profiles](#multiple-accounts--profiles) below. `~/.agents` is the one exception: it's always read from `$HOME/.agents` regardless, since it's a skill-manager symlink target unrelated to which Claude account is active.
+
+### Multiple accounts / profiles
+
+If you use more than one Claude account — say, separate `~/.claude-tessero` and `~/.claude-nextspace` config directories on your host, switched between via `claude`'s own `CLAUDE_CONFIG_DIR` env var — `claude-pod` recognizes the same variable:
+
+```sh
+CLAUDE_CONFIG_DIR=~/.claude-tessero claude-pod claude --dangerously-skip-permissions
+```
+
+This replaces the default `~/.claude` as the source for skills/plugins/`CLAUDE.md`/`settings.json`/`statusline.sh` (see [Claude config access](#claude-config-access)), and also relocates the `~/.claude.json` lookup used for [MCP server whitelisting](#mcp-servers) to `$CLAUDE_CONFIG_DIR/.claude.json` — matching where Claude Code itself puts it for a custom config dir, so a profile's own MCP servers get picked up automatically. Setting `CLAUDE_CONFIG_DIR` to a path that doesn't exist fails fast with a clear error before Docker runs.
+
+`CLAUDE_CONFIG_DIR` only changes what's *read* from the host, though — by itself it does **not** give each profile its own pod state (auth/session). Every pod still shares one `~/.claude-pod/`, so running two profiles at the same time would have them fight over the same login. For that, also set `CLAUDE_POD_HOME` (default `~/.claude-pod`) to a distinct path per profile:
+
+```sh
+CLAUDE_CONFIG_DIR=~/.claude-tessero  CLAUDE_POD_HOME=~/.claude-pod-tessero  claude-pod claude --dangerously-skip-permissions
+CLAUDE_CONFIG_DIR=~/.claude-nextspace CLAUDE_POD_HOME=~/.claude-pod-nextspace claude-pod claude --dangerously-skip-permissions
+```
+
+The two variables are independent — nothing derives one from the other — but naming `CLAUDE_POD_HOME` with the same suffix as `CLAUDE_CONFIG_DIR` (as above) keeps profiles easy to tell apart. Each `CLAUDE_POD_HOME` gets its own auth token and session history, so the two pods above can run concurrently, fully logged into different Claude accounts, without interfering with each other.
 
 ### Reaching host services
 
@@ -214,6 +236,8 @@ Only the exact vars you list cross into the container (same pass-through style a
 
 This covers locally-configured MCP servers only (your `~/.claude.json`'s `mcpServers` object). claude.ai account connectors (Linear, Notion, Asana, etc.) are a separate mechanism and aren't covered here.
 
+If you're using [`CLAUDE_CONFIG_DIR`](#multiple-accounts--profiles) for a custom profile, this reads that profile's own `mcpServers` (from `$CLAUDE_CONFIG_DIR/.claude.json`) instead of `~/.claude.json`.
+
 ### Pasting images and screenshots
 
 Claude can only read files that live **inside the project folder** — that's the one directory bind-mounted into the container. Images on your Desktop or in Downloads aren't mounted, so pasting one straight from there hands Claude a path it can't reach. This is the same isolation that keeps the rest of your machine private from the container ([What is and isn't isolated](#what-is-and-isnt-isolated)); the small bit of friction below is the price for not exposing those default locations.
@@ -254,7 +278,7 @@ The whole tool is four tiny files:
 - **`Dockerfile`** — `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + `@anthropic-ai/claude-code`.
 - **`claude-pod`** — one `docker run` command that mounts your current directory (plus a small state dir for login and history), and — read-only, by default — a curated subset of your Claude Code skills, plugins, and global config.
 - **`install.sh`** — checks Docker and builds the image. Doesn't touch any system path; the tool stays self-contained in this folder.
-- **`uninstall.sh`** — removes the image and `~/.claude-pod/` (auth + session history) after confirmation. Lists what it doesn't touch so you can clean those up yourself.
+- **`uninstall.sh`** — removes the image and `~/.claude-pod/` (or `CLAUDE_POD_HOME` if set; auth + session history) after confirmation. Lists what it doesn't touch so you can clean those up yourself.
 
 ### What is and isn't isolated
 
@@ -266,11 +290,11 @@ The whole tool is four tiny files:
 **Still exposed:**
 - **The project folder itself.** Anything inside it — `.env`, `.git/config` (which can carry credentials for private remotes), private keys committed by mistake, `node_modules`, sibling worktrees, scratch files — is fully readable *and* writable by code running in the container. Don't run `claude-pod` from a folder whose contents you wouldn't trust the AI (or a malicious dependency it just installed) to see and modify.
 - **The network.** Outbound is unrestricted by default. A malicious payload could exfiltrate the project contents or burn your Anthropic API quota. For offline work you can cut networking entirely with `NET=none` (see [Network isolation and resource limits](#network-isolation-and-resource-limits)), but that also takes Claude itself offline — there's no built-in egress allowlist that would keep Claude online while blocking everything else. Opting into `HOST_SERVICES=1` (see [Reaching host services](#reaching-host-services)) widens this further: the container can then also reach anything bound to your host's own loopback interface. `HOST_SERVICES="<ports>"` (the transparent-forwarding form) is narrower — only the named ports are reachable — but still opt-in for the same reason.
-- **Your Anthropic login** (stored in `~/.claude-pod/` on the host, separate from any host Claude install, shared across sandboxed projects).
+- **Your Anthropic login** (stored in `~/.claude-pod/` on the host, or `CLAUDE_POD_HOME` if set, separate from any host Claude install, shared across sandboxed projects using the same state dir).
 
 **Where Claude can actually write** — two paths, both intentional bind mounts:
 - The project folder, bind-mounted at the same path inside the container (`$PWD:$PWD`). Edits land on your host's disk directly, no copy.
-- `~/.claude-pod/` on the host, mounted at `/home/claude-pod/.claude`. Holds the auth token and session history.
+- `~/.claude-pod/` on the host (or `CLAUDE_POD_HOME` if set), mounted at `/home/claude-pod/.claude`. Holds the auth token and session history.
 
 > Because the current directory (`$PWD`) is mounted into the container, **avoid running this tool from directories like root (`/`) or `/etc` or other sensitive ones**. In such cases you are giving the AI access to your entire machine or to other sensitive data, defeating the purpose of the sandbox. Always `cd` into your specific project folder first.
 
@@ -312,13 +336,13 @@ HOST_SERVICES="27017 8000" claude-pod
 
 Everything this repo causes to exist outside the project you launch it from:
 
-- `~/.claude-pod/` on your host — auth token, settings, and per-project session/conversation history (transcripts can include code snippets and command output Claude saw). Auth and settings are shared across projects (one login, ever); session history lives under `~/.claude-pod/projects/<encoded-host-path>/`, one folder per project, using the same encoding host-Claude uses — so if you ever switch to a host install, you can copy the folders over and keep your transcripts. This is *not* a host Claude install; it's a state directory for the container's Claude, kept on the host so it survives restarts.
+- `~/.claude-pod/` on your host (or `CLAUDE_POD_HOME` if set) — auth token, settings, and per-project session/conversation history (transcripts can include code snippets and command output Claude saw). Auth and settings are shared across projects using the same state dir (one login, ever, per state dir); session history lives under `<state dir>/projects/<encoded-host-path>/`, one folder per project, using the same encoding host-Claude uses — so if you ever switch to a host install, you can copy the folders over and keep your transcripts. This is *not* a host Claude install; it's a state directory for the container's Claude, kept on the host so it survives restarts.
 - Docker image `claude-pod` and its layers, plus the `node:24-slim` base image, in Docker's image store.
 - Docker build cache from `apt-get` and `npm install` steps.
 - Outbound network during build: Docker Hub, Debian apt mirrors, npm registry. During runtime: `api.anthropic.com` and whatever your project code reaches (network is unrestricted).
 - While a session is running: one container process, and any ports you explicitly mapped via `PORTS` bound on `127.0.0.1`.
 
-No `sudo`, no writes to `/usr/local/`, `/etc/`, `~/.zshrc`, `~/Library/`, or anywhere else on the host. Your existing `~/.claude/` (skills, plugins, `CLAUDE.md`, `settings.json`, `statusline.sh`) and `~/.agents` are read from by default, but never written to — see [Claude config access](#claude-config-access). Your host's `~/.claude.json` is also read from by default (never written to), and `~/.claude-pod/.claude.json`'s `mcpServers` key is rewritten every run to match — see [MCP servers](#mcp-servers).
+No `sudo`, no writes to `/usr/local/`, `/etc/`, `~/.zshrc`, `~/Library/`, or anywhere else on the host. Your existing `~/.claude/` (skills, plugins, `CLAUDE.md`, `settings.json`, `statusline.sh` — or `CLAUDE_CONFIG_DIR` if set) and `~/.agents` are read from by default, but never written to — see [Claude config access](#claude-config-access). Your host's `~/.claude.json` (or `$CLAUDE_CONFIG_DIR/.claude.json`) is also read from by default (never written to), and the pod's own state dir's `.claude.json`'s `mcpServers` key is rewritten every run to match — see [MCP servers](#mcp-servers).
 
 ## Reference
 
@@ -341,6 +365,8 @@ If a platform doesn't behave as expected, please open an issue.
 ```
 
 Removes `~/.claude-pod/` and the `claude-pod` image after confirmation. Tells you exactly what it isn't touching (`node:24-slim`, build cache, this repo) and how to clean those up yourself.
+
+If you're running [multiple profiles](#multiple-accounts--profiles), `uninstall.sh` also respects `CLAUDE_POD_HOME` — run it once per profile's state dir to remove each individually, e.g. `CLAUDE_POD_HOME=~/.claude-pod-tessero ~/tools/claude-pod/uninstall.sh`. The shared `claude-pod` image is only actually removed the first time (or when it's already gone) — later runs report "was not present" for that part.
 
 If you added a shell alias for convenience (e.g. `alias claude-pod=...` in `~/.zshrc` / `~/.bashrc`), remove that line too — `uninstall.sh` doesn't touch your shell rc files.
 

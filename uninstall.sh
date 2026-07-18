@@ -11,7 +11,7 @@ err()  { printf '%s✗%s %s\n'       "$RED"   "$RESET" "$*" >&2; }
 die()  { err "$*"; trap - ERR; exit 1; }
 trap 'err "uninstall.sh failed at line $LINENO"' ERR
 
-CLAUDE_DIR="$HOME/.claude-pod"
+CLAUDE_DIR="${CLAUDE_POD_HOME:-$HOME/.claude-pod}"
 IMAGE="claude-pod"
 
 info "Will remove"
