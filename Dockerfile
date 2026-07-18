@@ -85,6 +85,13 @@ No SSH keys, git credential helper, or `gh` auth token are mounted into the cont
 comment`, etc.) will fail here. Don't attempt them -- tell the user what to run and
 let them do it from the host.
 
+## Never rewrite git branches
+NEVER rewrite a git branch in this sandbox -- no `push --force`/`--force-with-lease`,
+`rebase`, `commit --amend`, `reset --hard`, or `branch -D`. The project directory is
+the host's real working tree, not a copy, so a rewrite here mutates the host's actual
+repo state, not a disposable sandbox one. If a rewrite is genuinely needed, tell the
+user exactly what to run and let them do it themselves.
+
 ## Tools baked into the image
 - git, curl, less, jq, gh, socat, node/npm -- all on PATH already.
 - nvm is installed at `$NVM_DIR` (`$HOME/.nvm`) to switch Node versions. It's loaded
