@@ -79,6 +79,14 @@ Every Claude Code session inside a `claude-pod` container loads this file from
 the project's own CLAUDE.md and the user's `~/.claude/CLAUDE.md` -- it doesn't replace
 either.
 
+## Check access before starting
+Before starting a task, think about what it will need -- network access, a specific
+MCP server, a host service, elevated resource limits, git push access -- and whether
+this sandbox has it (see the sections below for what's available and what isn't). If
+something's missing, say so up front and tell the user what to set (`MCP_SERVERS`,
+`HOST_SERVICES`, etc.) or that it isn't possible here, instead of starting the work
+and hitting the gap partway through.
+
 ## No git/GitHub push credentials
 No SSH keys, git credential helper, or `gh` auth token are mounted into the container.
 `git push` and any `gh` command needing authentication (`gh pr create`, `gh issue
