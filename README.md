@@ -196,6 +196,8 @@ CLAUDE_CONFIG_DIR=~/.claude-nextspace CLAUDE_POD_HOME=~/.claude-pod-nextspace cl
 
 The two variables are independent — nothing derives one from the other — but naming `CLAUDE_POD_HOME` with the same suffix as `CLAUDE_CONFIG_DIR` (as above) keeps profiles easy to tell apart. Each `CLAUDE_POD_HOME` gets its own auth token and session history, so the two pods above can run concurrently, fully logged into different Claude accounts, without interfering with each other.
 
+> **Want several accounts each reachable from the Happy Coder mobile app, kept running persistently by systemd instead of one-off foreground commands?** See the [`multi-account-happy-setup`](.claude/skills/multi-account-happy-setup/SKILL.md) skill — it walks an agent through the full setup (directory layout, the MCP-whitelist and bypass-permissions gotchas that only surface on first run, the `HAPPY_HOME_DIR`/`HAPPY_MACHINE_NAME` pairing, the systemd unit template, and the recommended test suite) for as many accounts as you name.
+
 ### Reaching host services
 
 By default, the container can't reach anything bound to your host's loopback interface (`127.0.0.1`) — a local Postgres, Redis, or other dev-only service is invisible to it, same as the rest of your machine. If your tests need one, set `HOST_SERVICES=1`:
