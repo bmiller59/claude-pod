@@ -23,6 +23,12 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 # MCP_SERVERS whitelist in the claude-pod script. Not a general-purpose default for other forks.
 RUN npm install -g @colbymchenry/codegraph
 
+# Happy Coder CLI (https://happy.engineering, https://github.com/slopus/happy-cli): an optional
+# wrapper around `claude` that adds mobile/web session pairing. Installs the `happy` binary.
+# Invoked as `claude-pod happy --claude-arg <arg>` instead of `claude-pod claude <arg>` -- see the
+# claude-pod script's HAPPY_HOME_DIR handling for its state dir.
+RUN npm install -g happy-coder
+
 # We DO NOT use `USER node` here. Instead, we pass `--user "$(id -u):$(id -g)"` dynamically
 # at runtime in the `claude-pod` script. This ensures perfect file permission alignment
 # between the host and the container, especially on Linux environments.
@@ -107,13 +113,15 @@ user exactly what to run and let them do it themselves.
   run, source it first: `. "$NVM_DIR/nvm.sh" && nvm use <version>`.
 - The codegraph MCP server is available by default (see `MCP_SERVERS` in the
   `claude-pod` script) when a project has a `.codegraph/` index.
+- `happy` (Happy Coder CLI) is available as an alternative way to start a session --
+  `happy --claude-arg <arg>` instead of `claude <arg>` -- for mobile/web session pairing.
 
 ## Isolation
 Only the project directory the pod was launched from (mounted at the same path as
-the host) and the pod's own `~/.claude` state are visible. Other host paths and other
-projects are not reachable. If the run was started with `NET=none`, there is no
-network at all -- not even to api.anthropic.com -- so that mode is for offline
-shell/build work, not a live Claude session.
+the host) and the pod's own `~/.claude` and `~/.happy` state are visible. Other host
+paths and other projects are not reachable. If the run was started with `NET=none`,
+there is no network at all -- not even to api.anthropic.com -- so that mode is for
+offline shell/build work, not a live Claude session.
 EOF
 
 # Entrypoint: proxies named host ports onto the container's own loopback before running the real

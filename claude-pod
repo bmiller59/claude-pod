@@ -17,6 +17,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   printf '\n%sRun%s  (cd into your project first — the current folder is what gets mounted):\n' "$BOLD" "$RESET"
   row "Open a shell:"   "$HERE/claude-pod"
   row "Run Claude:"     "$HERE/claude-pod claude --dangerously-skip-permissions"
+  row "Run via Happy:"  "$HERE/claude-pod happy --claude-arg --dangerously-skip-permissions"
   printf '\n%sManage%s  (works from any folder):\n' "$BOLD" "$RESET"
   row "Install/update:" "$HERE/install.sh"
   row "Pin a version:"  "CLAUDE_CODE_VERSION=2.0.0 $HERE/install.sh"
@@ -30,6 +31,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   row "Forward MCP secrets:" "MCP_SERVER_ENV=AGENTMEMORY_SECRET $HERE/claude-pod"
   row "Custom config dir:" "CLAUDE_CONFIG_DIR=~/.claude-tessero $HERE/claude-pod (default ~/.claude; same var Claude Code itself uses)"
   row "Custom state dir:" "CLAUDE_POD_HOME=~/.claude-pod-tessero $HERE/claude-pod (default ~/.claude-pod; pair with CLAUDE_CONFIG_DIR for parallel accounts)"
+  row "Custom Happy state dir:" "HAPPY_HOME_DIR=~/.happy-pod $HERE/claude-pod (default ~/.happy, shared with any host-side happy; same var Happy itself uses)"
   printf '\n'
   row "Shortcut alias:" "alias claude-pod=$HERE/claude-pod"
   row "Full README:"    "https://github.com/bmiller59/claude-pod"
@@ -73,6 +75,20 @@ mkdir -p "$POD_HOME"
 chmod 700 "$POD_HOME"
 chmod 600 "$POD_HOME/.claude.json"
 
+# Happy Coder CLI (https://happy.engineering) is baked into the image as an optional way to run
+# Claude -- `claude-pod happy --claude-arg --dangerously-skip-permissions` instead of `claude-pod
+# claude --dangerously-skip-permissions`. It keeps its own state (auth/session data for the mobile
+# pairing) under HAPPY_HOME_DIR -- that's Happy's own env var, default $HOME/.happy, not one we
+# invented, so it behaves the same whether `happy` is run directly on the host or via claude-pod.
+# Unlike CLAUDE_POD_HOME, this default is NOT pod-exclusive: if you also run `happy` on the host,
+# the pod shares that same state dir by default. Point HAPPY_HOME_DIR at a separate directory
+# (e.g. ~/.happy-pod) if you want the pod's happy state kept apart from the host's -- and note
+# uninstall.sh deliberately does NOT remove this dir, since by default it may be host state, not
+# pod-exclusive state the way ~/.claude-pod is.
+HAPPY_HOME="${HAPPY_HOME_DIR:-$HOME/.happy}"
+mkdir -p "$HAPPY_HOME"
+chmod 700 "$HAPPY_HOME"
+
 # Mounts & Users:
 #   --user -> dynamic                            Runs container exactly as the host user to prevent permission issues.
 #   HOME=/home/claude-pod                        Because user is dynamic, we use a dedicated writable home dir.
@@ -82,6 +98,8 @@ chmod 600 "$POD_HOME/.claude.json"
 #   $POD_HOME -> /home/claude-pod/.claude        credentials, sessions, history (the .claude dir).
 #                                                default ~/.claude-pod; override with CLAUDE_POD_HOME.
 #   $POD_HOME/.claude.json -> ditto              account binding + project trust state (sibling file).
+#   $HAPPY_HOME -> /home/claude-pod/.happy       Happy Coder CLI's own state; default ~/.happy;
+#                                                override with HAPPY_HOME_DIR.
 # TTY Detection:
 #   If we pipe data into the script (e.g. `cat file | claude-pod`), input is not a terminal.
 #   Passing `-t` to Docker in this case would cause a crash.
@@ -301,4 +319,5 @@ exec docker run "${DOCKER_FLAGS[@]}" \
   -w "$PWD" \
   -v "$POD_HOME:/home/claude-pod/.claude" \
   -v "$POD_HOME/.claude.json:/home/claude-pod/.claude.json" \
+  -v "$HAPPY_HOME:/home/claude-pod/.happy" \
   claude-pod "$@"

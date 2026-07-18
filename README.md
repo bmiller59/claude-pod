@@ -49,6 +49,7 @@ Docker is the only requirement — no Node.js, npm, or `claude` needed on your h
   - [Requirements](#requirements)
   - [Running claude-pod](#running-claude-pod)
   - [Aliases](#aliases)
+  - [Running Happy Coder](#running-happy-coder)
   - [First launch (login)](#first-launch-login)
   - [Exposing ports](#exposing-ports)
   - [Claude config access](#claude-config-access)
@@ -108,6 +109,22 @@ alias claude-pod=~/tools/claude-pod/claude-pod
 ```
 
 This is the shell-first form: `claude-pod` drops you into the container with `claude` on `PATH`, so you can run `npm install`, a dev server, or tests and then start `claude` yourself — all inside the sandbox. The same alias also goes straight into Claude when you pass the command through: `claude-pod claude --dangerously-skip-permissions`.
+
+### Running Happy Coder
+
+[Happy Coder](https://happy.engineering) (`happy`) is baked into the image as an alternative front-end for Claude Code — it adds encrypted mobile/web session pairing on top of the same underlying `claude` process. Use `--claude-arg` to forward flags through to `claude` itself:
+
+```sh
+claude-pod happy --claude-arg --dangerously-skip-permissions
+```
+
+Happy keeps its own state (auth/session data for the pairing) under `HAPPY_HOME_DIR` (default `~/.happy`) — that's Happy's own env var, not something `claude-pod` invented, so it works the same whether you run `happy` directly on your host or through the pod. This is the one state dir in this project that **isn't** pod-exclusive by default: if you also run `happy` natively on your host, the pod shares that same `~/.happy` directory (read-write) rather than getting a separate copy the way `~/.claude-pod` does for Claude's own login. If you'd rather keep the pod's Happy state separate, point it at its own directory:
+
+```sh
+HAPPY_HOME_DIR=~/.happy-pod claude-pod happy --claude-arg --dangerously-skip-permissions
+```
+
+Because the default isn't pod-exclusive, `uninstall.sh` deliberately does **not** remove `~/.happy` (or a custom `HAPPY_HOME_DIR`) — doing so could delete real host-side Happy state. Clean that up yourself if you used a dedicated directory and no longer need it.
 
 ### First launch (login)
 
@@ -267,7 +284,7 @@ Pinned versions cache normally across rebuilds. The script prints the resolved v
 
 ### Customizing the image
 
-The image is intentionally minimal: `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + Claude Code, plus `@colbymchenry/codegraph` and `nvm` (this fork's personal additions — see [CLAUDE.md](CLAUDE.md)). Nothing else language-specific. Anything your projects need (Python, build tools, other toolchains), or another [MCP server](#mcp-servers)'s underlying command, you add yourself — edit the `Dockerfile` and re-run `~/tools/claude-pod/install.sh`.
+The image is intentionally minimal: `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + Claude Code, plus `@colbymchenry/codegraph`, `nvm`, and `happy-coder` (this fork's personal additions — see [CLAUDE.md](CLAUDE.md)). Nothing else language-specific. Anything your projects need (Python, build tools, other toolchains), or another [MCP server](#mcp-servers)'s underlying command, you add yourself — edit the `Dockerfile` and re-run `~/tools/claude-pod/install.sh`.
 
 ## Security and limits
 
@@ -275,8 +292,8 @@ The image is intentionally minimal: `node:24-slim` + `git` + `curl` + `less` + `
 
 The whole tool is four tiny files:
 
-- **`Dockerfile`** — `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + `@anthropic-ai/claude-code`.
-- **`claude-pod`** — one `docker run` command that mounts your current directory (plus a small state dir for login and history), and — read-only, by default — a curated subset of your Claude Code skills, plugins, and global config.
+- **`Dockerfile`** — `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + `@anthropic-ai/claude-code` (+ `happy-coder`, this fork's addition).
+- **`claude-pod`** — one `docker run` command that mounts your current directory (plus small state dirs for Claude's and, if you use it, Happy's login and history), and — read-only, by default — a curated subset of your Claude Code skills, plugins, and global config.
 - **`install.sh`** — checks Docker and builds the image. Doesn't touch any system path; the tool stays self-contained in this folder.
 - **`uninstall.sh`** — removes the image and `~/.claude-pod/` (or `CLAUDE_POD_HOME` if set; auth + session history) after confirmation. Lists what it doesn't touch so you can clean those up yourself.
 
@@ -291,10 +308,12 @@ The whole tool is four tiny files:
 - **The project folder itself.** Anything inside it — `.env`, `.git/config` (which can carry credentials for private remotes), private keys committed by mistake, `node_modules`, sibling worktrees, scratch files — is fully readable *and* writable by code running in the container. Don't run `claude-pod` from a folder whose contents you wouldn't trust the AI (or a malicious dependency it just installed) to see and modify.
 - **The network.** Outbound is unrestricted by default. A malicious payload could exfiltrate the project contents or burn your Anthropic API quota. For offline work you can cut networking entirely with `NET=none` (see [Network isolation and resource limits](#network-isolation-and-resource-limits)), but that also takes Claude itself offline — there's no built-in egress allowlist that would keep Claude online while blocking everything else. Opting into `HOST_SERVICES=1` (see [Reaching host services](#reaching-host-services)) widens this further: the container can then also reach anything bound to your host's own loopback interface. `HOST_SERVICES="<ports>"` (the transparent-forwarding form) is narrower — only the named ports are reachable — but still opt-in for the same reason.
 - **Your Anthropic login** (stored in `~/.claude-pod/` on the host, or `CLAUDE_POD_HOME` if set, separate from any host Claude install, shared across sandboxed projects using the same state dir).
+- **Happy Coder's state**, if you use `happy` (see [Running Happy Coder](#running-happy-coder)) — stored in `~/.happy/` by default, which unlike `~/.claude-pod/` is shared with any host-side `happy` install unless you set `HAPPY_HOME_DIR` to a dedicated directory.
 
-**Where Claude can actually write** — two paths, both intentional bind mounts:
+**Where Claude can actually write** — three paths, all intentional bind mounts:
 - The project folder, bind-mounted at the same path inside the container (`$PWD:$PWD`). Edits land on your host's disk directly, no copy.
 - `~/.claude-pod/` on the host (or `CLAUDE_POD_HOME` if set), mounted at `/home/claude-pod/.claude`. Holds the auth token and session history.
+- `~/.happy/` on the host (or `HAPPY_HOME_DIR` if set), mounted at `/home/claude-pod/.happy`, when running via `happy` instead of `claude` directly.
 
 > Because the current directory (`$PWD`) is mounted into the container, **avoid running this tool from directories like root (`/`) or `/etc` or other sensitive ones**. In such cases you are giving the AI access to your entire machine or to other sensitive data, defeating the purpose of the sandbox. Always `cd` into your specific project folder first.
 
@@ -337,6 +356,7 @@ HOST_SERVICES="27017 8000" claude-pod
 Everything this repo causes to exist outside the project you launch it from:
 
 - `~/.claude-pod/` on your host (or `CLAUDE_POD_HOME` if set) — auth token, settings, and per-project session/conversation history (transcripts can include code snippets and command output Claude saw). Auth and settings are shared across projects using the same state dir (one login, ever, per state dir); session history lives under `<state dir>/projects/<encoded-host-path>/`, one folder per project, using the same encoding host-Claude uses — so if you ever switch to a host install, you can copy the folders over and keep your transcripts. This is *not* a host Claude install; it's a state directory for the container's Claude, kept on the host so it survives restarts.
+- `~/.happy/` on your host (or `HAPPY_HOME_DIR` if set), created only if you run `happy` — see [Running Happy Coder](#running-happy-coder). Unlike `~/.claude-pod/`, this is Happy's *own* default state location (not a pod-specific fork of it), so it's shared with any host-side `happy` usage unless you override it.
 - Docker image `claude-pod` and its layers, plus the `node:24-slim` base image, in Docker's image store.
 - Docker build cache from `apt-get` and `npm install` steps.
 - Outbound network during build: Docker Hub, Debian apt mirrors, npm registry. During runtime: `api.anthropic.com` and whatever your project code reaches (network is unrestricted).
@@ -369,6 +389,8 @@ Removes `~/.claude-pod/` and the `claude-pod` image after confirmation. Tells yo
 If you're running [multiple profiles](#multiple-accounts--profiles), `uninstall.sh` also respects `CLAUDE_POD_HOME` — run it once per profile's state dir to remove each individually, e.g. `CLAUDE_POD_HOME=~/.claude-pod-tessero ~/tools/claude-pod/uninstall.sh`. The shared `claude-pod` image is only actually removed the first time (or when it's already gone) — later runs report "was not present" for that part.
 
 If you added a shell alias for convenience (e.g. `alias claude-pod=...` in `~/.zshrc` / `~/.bashrc`), remove that line too — `uninstall.sh` doesn't touch your shell rc files.
+
+`uninstall.sh` deliberately does **not** remove `~/.happy/` (or a custom `HAPPY_HOME_DIR`) — see [Running Happy Coder](#running-happy-coder) for why that dir isn't pod-exclusive the way `~/.claude-pod/` is. Remove it yourself if you used a dedicated directory for the pod and no longer need it.
 
 ### License and trademarks
 
