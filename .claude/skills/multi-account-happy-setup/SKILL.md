@@ -40,7 +40,7 @@ Ask the user (don't assume):
      settings change in Step 3 and the flag in Steps 4/6 for that account.
 4. Do any accounts already have host-side state (an existing
    `~/.claude-<id>` from prior setup)? Check before creating — don't clobber.
-5. Which of the tests in Step 7 do they want to run? Default recommendation:
+5. Which of the tests in Step 8 do they want to run? Default recommendation:
    run everything except 7.6 (reboot) and 7.9 (concurrent load) unless they
    want the full suite — those two need the user's direct involvement
    (an actual reboot, or sending prompts from the phone).
@@ -141,7 +141,51 @@ permission prompts actually surface somewhere reachable (e.g. the mobile
 app) rather than silently hanging — this combination wasn't exercised
 end-to-end when this skill was written, so verify it for real here.
 
-## Step 7: Tests (see REFERENCE.md for exact commands per test)
+## Step 7: Local shell aliases to attach to each session (optional)
+
+Since each container is named exactly like its account (via
+`HAPPY_MACHINE_NAME`, see Step 6), offer one alias per account so the user
+can jump straight into a running session's live terminal locally, not just
+through the mobile app — useful for quick debugging without disturbing
+what's running. Don't use a plain `alias happy-<id>='docker attach <id>'`
+— wrap it in a function that prints the detach reminder and makes the user
+press Enter before actually attaching, so the reminder can't be missed by
+habit/muscle memory once it's been run a few times:
+
+```bash
+happy_attach() {
+  local id="$1"
+  echo "------------------------------------------------------------"
+  echo "Attaching to the live '$id' Happy/Claude session."
+  echo "To detach WITHOUT ending the session: Ctrl+P then Ctrl+Q"
+  echo "Do NOT use Ctrl+C, Ctrl+D, or /exit -- those end or interrupt"
+  echo "the live session (shared with the mobile app), not just your view."
+  echo "------------------------------------------------------------"
+  read -r -p "Press Enter to attach to '$id'... "
+  docker attach "$id"
+}
+alias happy-<id>='happy_attach <id>'
+```
+
+One `alias happy-<id>='happy_attach <id>'` line per account, all sharing
+the single `happy_attach` function. Add these to the user's shell rc file
+(ask which — `~/.bashrc`, `~/.zshrc`, etc).
+
+Tell the user explicitly, every time this is set up: **detach with
+`Ctrl+P` then `Ctrl+Q`, never `Ctrl+C`, `Ctrl+D`, or `/exit`** — `Ctrl+C`
+sends SIGINT into the live Claude session (interrupts whatever it's
+doing), and `/exit` ends that session outright (it's shared with the
+mobile app, same as everything else here — no primary/secondary
+distinction, so typing while attached sends real keystrokes into whatever
+the mobile app is also connected to, and ending it via `/exit` kicks out
+anyone using it from the phone with no warning). `Restart=always` will
+bring the account back on its own if that happens, but it's a fresh
+session, not a resume — see REFERENCE.md. Also see REFERENCE.md for what
+was verified about `docker attach`'s own behavior — it does not exit
+cleanly on a plain `SIGTERM` if this is ever scripted rather than run by a
+human directly.
+
+## Step 8: Tests (see REFERENCE.md for exact commands per test)
 
 Run whatever the user opted into from Step 0. Recommended defaults:
 

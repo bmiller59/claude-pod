@@ -151,7 +151,48 @@ Three details that are easy to "simplify away" and shouldn't be:
    always — check this explicitly after every restart/crash test, not just
    that the systemd unit reports active.
 
-## Step 7 detail: exact test commands
+## Step 7 detail: `docker attach` behavior, verified
+
+Attaching to one of these containers (`docker attach <id>`) does show the
+live session's real terminal output and accepts real keystrokes — the
+container was started with `-i`/`-t` (see Step 6), so this works the same
+as attaching to any interactive container. Two things confirmed by testing
+against a real running account, not assumed:
+
+1. **Killing the *attach client* process (even with `SIGKILL`) does not
+   affect the container.** `docker attach` is a viewer/multiplexer, not the
+   process owner — the container, and the live Claude/Happy session inside
+   it, keeps running exactly as before. Confirmed by force-killing an
+   attach client and checking the container was still `Up` and the
+   session's `claude.exe` process was still alive immediately after.
+2. **A plain `SIGTERM` to the `docker attach` client does *not* reliably
+   make it exit** — in testing, `timeout 5 docker attach --no-stdin <id>`
+   did not stop after 5 seconds; the client process was still running
+   noticeably later and had to be killed with `SIGKILL`. If this is ever
+   invoked from something non-interactive (a script, a health check), don't
+   assume a `timeout`-wrapped `docker attach` will actually terminate on
+   schedule — verify it, or kill it by PID afterward, same as here.
+
+Interactively, the correct way to leave without disturbing anything is
+Docker's own detach sequence: `Ctrl+P` then `Ctrl+Q`. `Ctrl+C` is not a
+detach — it sends SIGINT into whatever's running in the container's
+foreground (the live Claude session), which would interrupt it.
+
+**`/exit` is a third, distinct way people reach for by habit, and it's not
+a detach either.** It's Claude Code's own command to end its session —
+since this is the same shared session the mobile app is connected to (not
+a separate view), `/exit` ends that session for the phone too, not just
+locally. What happens next follows directly from `Restart=always` having
+no `RestartPreventExitStatus` configured: it restarts on any exit, clean
+or crashed, so the account comes back on its own in ~5-10s (same recovery
+path as the crash-kill test in 7.8) — but it's a *new* session, not a
+resume of the one that was just ended, since `ExecStart` doesn't pass
+`--resume`. This specific path (a clean in-app `/exit`, as opposed to an
+external `docker kill`) was reasoned through from systemd's documented
+semantics, not independently exercised the way 7.8 was — if it matters,
+verify it for real rather than trust this note alone.
+
+## Step 8 detail: exact test commands
 
 **7.1 Basic liveness**
 ```bash
