@@ -192,6 +192,24 @@ external `docker kill`) was reasoned through from systemd's documented
 semantics, not independently exercised the way 7.8 was — if it matters,
 verify it for real rather than trust this note alone.
 
+**A fourth way people get tripped up: attaching from inside an IDE's
+integrated terminal (VS Code confirmed).** `Ctrl+Q` was caught by VS Code
+itself — closed the whole window — instead of ever reaching the terminal
+as a detach keystroke. This is a real, hit-for-real conflict, not a
+hypothetical: IDEs bind their own global shortcuts on top of whatever the
+terminal panel would otherwise receive, and which chords get through
+varies by IDE, OS, and the user's own keybinding customizations, so there
+is no single alternate `--detach-keys` sequence that can be asserted safe
+across setups without a human actually testing it in their specific
+environment. Don't hand out a "safer" chord as if it's confirmed. The
+fallback that *is* safe regardless of what the IDE intercepts: close or
+kill the terminal tab/panel outright (VS Code: trash-can icon on the
+terminal, or the "Terminal: Kill the Active Terminal Instance" command).
+That only terminates the local shell and its child `docker attach`
+client — per the two points above, killing the attach client (by any
+means, including this) does not touch the container or the session
+running inside it.
+
 ## Step 8 detail: exact test commands
 
 **7.1 Basic liveness**

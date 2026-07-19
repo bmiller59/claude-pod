@@ -160,6 +160,11 @@ happy_attach() {
   echo "To detach WITHOUT ending the session: Ctrl+P then Ctrl+Q"
   echo "Do NOT use Ctrl+C, Ctrl+D, or /exit -- those end or interrupt"
   echo "the live session (shared with the mobile app), not just your view."
+  echo "IN VS CODE'S INTEGRATED TERMINAL: Ctrl+Q may be caught by VS Code"
+  echo "itself (e.g. quitting the window) instead of reaching the terminal."
+  echo "If so, don't fight it -- just close/kill this terminal tab instead"
+  echo "(trash-can icon, or 'Terminal: Kill the Active Terminal Instance')."
+  echo "That only ends your local view, same as Ctrl+P Ctrl+Q would."
   echo "------------------------------------------------------------"
   read -r -p "Press Enter to attach to '$id'... "
   docker attach "$id"
@@ -184,6 +189,19 @@ session, not a resume — see REFERENCE.md. Also see REFERENCE.md for what
 was verified about `docker attach`'s own behavior — it does not exit
 cleanly on a plain `SIGTERM` if this is ever scripted rather than run by a
 human directly.
+
+**If the user attaches from inside an IDE's integrated terminal (VS Code,
+etc.), warn them up front that `Ctrl+Q` (and possibly `Ctrl+P`) may be
+intercepted by the IDE itself before it ever reaches the terminal** — this
+was hit for real: `Ctrl+Q` closed VS Code instead of detaching. Don't try
+to route around this with a fancier `--detach-keys` chord (`docker attach
+--detach-keys`) unless the user actually verifies it works in their
+specific IDE/keybinding setup — there's no way to confirm any given chord
+is safe without a human physically testing it. The reliable fallback
+already covered in the printed note — closing/killing the terminal tab —
+works regardless of what the IDE intercepts, because it only kills the
+local attach client, which does not affect the container (verified in
+REFERENCE.md).
 
 ## Step 8: Tests (see REFERENCE.md for exact commands per test)
 
