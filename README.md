@@ -56,9 +56,11 @@ Docker is the only requirement — no Node.js, npm, or `claude` needed on your h
   - [Multiple accounts / profiles](#multiple-accounts--profiles)
   - [Reaching host services](#reaching-host-services)
   - [MCP servers](#mcp-servers)
+  - [Forwarding environment variables](#forwarding-environment-variables)
   - [Pasting images and screenshots](#pasting-images-and-screenshots)
   - [Updating or pinning the Claude Code version](#updating-or-pinning-the-claude-code-version)
   - [Customizing the image](#customizing-the-image)
+  - [Installing extra tools per-instance](#installing-extra-tools-per-instance)
 - [Security and limits](#security-and-limits)
   - [What it actually does](#what-it-actually-does)
   - [What is and isn't isolated](#what-is-and-isnt-isolated)
@@ -251,11 +253,25 @@ If a server's config references env vars (like `agentmemory`'s `AGENTMEMORY_URL`
 MCP_SERVERS=agentmemory MCP_SERVER_ENV="AGENTMEMORY_URL AGENTMEMORY_SECRET" claude-pod
 ```
 
-Only the exact vars you list cross into the container (same pass-through style as `COLORTERM`). Nothing is auto-detected from a server's config — a credential only ends up in the sandbox if you name it, since anything forwarded here becomes reachable from code running under `--dangerously-skip-permissions`.
+This is the same mechanism as the general-purpose [`ENV_PASSTHROUGH`](#forwarding-environment-variables) below, kept under its own name for the MCP-secret case specifically — set either or both, they combine rather than override each other.
 
 This covers locally-configured MCP servers only (your `~/.claude.json`'s `mcpServers` object). claude.ai account connectors (Linear, Notion, Asana, etc.) are a separate mechanism and aren't covered here.
 
 If you're using [`CLAUDE_CONFIG_DIR`](#multiple-accounts--profiles) for a custom profile, this reads that profile's own `mcpServers` (from `$CLAUDE_CONFIG_DIR/.claude.json`) instead of `~/.claude.json`.
+
+### Forwarding environment variables
+
+Nothing from your host shell's environment reaches the container by default — not even something as ordinary as `AWS_PROFILE` or an API key you've exported locally. Name exactly what an instance needs with `ENV_PASSTHROUGH`, a space-separated list of host env var *names* (not values):
+
+```sh
+AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_DEFAULT_REGION=us-east-1 \
+  ENV_PASSTHROUGH="AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION" \
+  claude-pod claude --dangerously-skip-permissions
+```
+
+Only the exact vars you list cross into the container (bare `-e NAME`, same pass-through style as `COLORTERM`). Nothing is inferred or auto-detected — a credential only ends up in the sandbox if you name it, since anything forwarded here becomes reachable from code running under `--dangerously-skip-permissions`. This is per-invocation, not baked into the image, so different instances can forward completely different vars (or none) without touching the `Dockerfile`.
+
+`MCP_SERVER_ENV` (see [MCP servers](#mcp-servers) above) is this same mechanism under a name scoped to MCP-server secrets specifically; the two combine if you set both.
 
 ### Pasting images and screenshots
 
@@ -286,7 +302,41 @@ Pinned versions cache normally across rebuilds. The script prints the resolved v
 
 ### Customizing the image
 
-The image is intentionally minimal: `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + Claude Code, plus `@colbymchenry/codegraph`, `nvm`, and `happy-coder` (this fork's personal additions — see [CLAUDE.md](CLAUDE.md)). Nothing else language-specific. Anything your projects need (Python, build tools, other toolchains), or another [MCP server](#mcp-servers)'s underlying command, you add yourself — edit the `Dockerfile` and re-run `~/tools/claude-pod/install.sh`.
+The image is intentionally minimal: `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + `unzip` + Claude Code, plus `@colbymchenry/codegraph`, `nvm`, and `happy-coder` (this fork's personal additions — see [CLAUDE.md](CLAUDE.md)). Nothing else language-specific. Anything **every** instance needs (Python, build tools, other toolchains), or another [MCP server](#mcp-servers)'s underlying command, belongs here — edit the `Dockerfile` and re-run `~/tools/claude-pod/install.sh`. Something only *some* instances need doesn't have to go in the shared image at all — see the next section.
+
+### Installing extra tools per-instance
+
+Not every dependency is worth baking into the shared image — a tool only one project or one profile needs (the AWS CLI for a project that touches AWS, say) shouldn't bloat every other instance's container. Two pieces make this possible without a rebuild:
+
+1. **A writable, persistent place to install into.** `CLAUDE_POD_HOME` (default `~/.claude-pod`, see [Multiple accounts / profiles](#multiple-accounts--profiles)) is bind-mounted at `/home/claude-pod/.claude` and survives container restarts — unlike the rest of the container's filesystem, which is discarded on exit (`--rm`). Installing a tool there means you only pay the install cost once per profile, not once per container start.
+2. **A hook that loads it automatically.** The image's entrypoint sources `$HOME/.claude/profile.sh` (i.e. `<CLAUDE_POD_HOME>/profile.sh` on the host) before running your command, if that file exists — before `exec`, so it applies uniformly whether you're in an interactive shell or a non-interactive `claude-pod claude ...` run. Nothing to configure; just create the file.
+
+Worked example — AWS CLI + credentials, installed once per profile:
+
+```sh
+# One-time, inside a pod session: download and install AWS CLI v2 into the persistent state dir
+# instead of the ephemeral container filesystem, so it's still there on your next container start.
+claude-pod bash -c '
+  curl -sSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip &&
+  unzip -q /tmp/awscliv2.zip -d /tmp &&
+  /tmp/aws/install -i "$HOME/.claude/tools/aws-cli" -b "$HOME/.claude/tools/bin"
+'
+
+# One-time, on the host: make that install directory load automatically every future session.
+echo 'export PATH="$HOME/.claude/tools/bin:$PATH"' >> ~/.claude-pod/profile.sh
+```
+
+From then on, every run picks up `aws` on `PATH` automatically. Credentials still aren't forwarded by this — pass those per-run with [`ENV_PASSTHROUGH`](#forwarding-environment-variables), same as any other secret:
+
+```sh
+AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_DEFAULT_REGION=us-east-1 \
+  ENV_PASSTHROUGH="AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION" \
+  claude-pod claude --dangerously-skip-permissions
+```
+
+This only works for tools that install without root — the container still runs as an unprivileged, dynamic, `--cap-drop=ALL` user with no `sudo` (see [What it actually does](#what-it-actually-does)), so anything requiring `apt-get install` (a real system package, not a self-contained binary/installer like AWS CLI's) still has to go in the `Dockerfile` and be shared across every instance.
+
+If you're running [multiple profiles](#multiple-accounts--profiles) (distinct `CLAUDE_POD_HOME` per profile), each gets its own `profile.sh` and installed tools automatically, since each has its own state dir.
 
 ## Security and limits
 
@@ -294,7 +344,7 @@ The image is intentionally minimal: `node:24-slim` + `git` + `curl` + `less` + `
 
 The whole tool is four tiny files:
 
-- **`Dockerfile`** — `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + `@anthropic-ai/claude-code` (+ `happy-coder`, this fork's addition).
+- **`Dockerfile`** — `node:24-slim` + `git` + `curl` + `less` + `jq` + `gh` + `unzip` + `@anthropic-ai/claude-code` (+ `happy-coder`, this fork's addition).
 - **`claude-pod`** — one `docker run` command that mounts your current directory (plus small state dirs for Claude's and, if you use it, Happy's login and history), and — read-only, by default — a curated subset of your Claude Code skills, plugins, and global config.
 - **`install.sh`** — checks Docker and builds the image. Doesn't touch any system path; the tool stays self-contained in this folder.
 - **`uninstall.sh`** — removes the image and `~/.claude-pod/` (or `CLAUDE_POD_HOME` if set; auth + session history) after confirmation. Lists what it doesn't touch so you can clean those up yourself.
@@ -314,7 +364,7 @@ The whole tool is four tiny files:
 
 **Where Claude can actually write** — three paths, all intentional bind mounts:
 - The project folder, bind-mounted at the same path inside the container (`$PWD:$PWD`). Edits land on your host's disk directly, no copy.
-- `~/.claude-pod/` on the host (or `CLAUDE_POD_HOME` if set), mounted at `/home/claude-pod/.claude`. Holds the auth token and session history.
+- `~/.claude-pod/` on the host (or `CLAUDE_POD_HOME` if set), mounted at `/home/claude-pod/.claude`. Holds the auth token and session history, plus anything you've put there yourself — e.g. a `profile.sh` init hook or tools it installs (see [Installing extra tools per-instance](#installing-extra-tools-per-instance)).
 - `~/.happy/` on the host (or `HAPPY_HOME_DIR` if set), mounted at `/home/claude-pod/.happy`, when running via `happy` instead of `claude` directly.
 
 > Because the current directory (`$PWD`) is mounted into the container, **avoid running this tool from directories like root (`/`) or `/etc` or other sensitive ones**. In such cases you are giving the AI access to your entire machine or to other sensitive data, defeating the purpose of the sandbox. Always `cd` into your specific project folder first.
@@ -357,7 +407,7 @@ HOST_SERVICES="27017 8000" claude-pod
 
 Everything this repo causes to exist outside the project you launch it from:
 
-- `~/.claude-pod/` on your host (or `CLAUDE_POD_HOME` if set) — auth token, settings, and per-project session/conversation history (transcripts can include code snippets and command output Claude saw). Auth and settings are shared across projects using the same state dir (one login, ever, per state dir); session history lives under `<state dir>/projects/<encoded-host-path>/`, one folder per project, using the same encoding host-Claude uses — so if you ever switch to a host install, you can copy the folders over and keep your transcripts. This is *not* a host Claude install; it's a state directory for the container's Claude, kept on the host so it survives restarts.
+- `~/.claude-pod/` on your host (or `CLAUDE_POD_HOME` if set) — auth token, settings, and per-project session/conversation history (transcripts can include code snippets and command output Claude saw). Auth and settings are shared across projects using the same state dir (one login, ever, per state dir); session history lives under `<state dir>/projects/<encoded-host-path>/`, one folder per project, using the same encoding host-Claude uses — so if you ever switch to a host install, you can copy the folders over and keep your transcripts. This is *not* a host Claude install; it's a state directory for the container's Claude, kept on the host so it survives restarts. If you've set up a `profile.sh` init hook (see [Installing extra tools per-instance](#installing-extra-tools-per-instance)), whatever it installed also lives here.
 - `~/.happy/` on your host (or `HAPPY_HOME_DIR` if set), created only if you run `happy` — see [Running Happy Coder](#running-happy-coder). Unlike `~/.claude-pod/`, this is Happy's *own* default state location (not a pod-specific fork of it), so it's shared with any host-side `happy` usage unless you override it.
 - Docker image `claude-pod` and its layers, plus the `node:24-slim` base image, in Docker's image store.
 - Docker build cache from `apt-get` and `npm install` steps.

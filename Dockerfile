@@ -3,9 +3,11 @@ FROM node:24-slim
 
 # git/curl/less are baseline dev tools; jq and gh are reached for by Claude's built-in workflows
 # (JSON pipelines and the GitHub CLI for PRs/issues/releases). ca-certificates is needed for HTTPS.
-# socat backs the HOST_SERVICES port-forwarding entrypoint below.
+# socat backs the HOST_SERVICES port-forwarding entrypoint below. unzip is here for unpacking
+# prebuilt-binary releases (e.g. the AWS CLI v2 installer -- see "Installing extra tools
+# per-instance" in the README) that a per-profile init hook installs on demand, not baked in here.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates curl less jq gh socat \
+ && apt-get install -y --no-install-recommends git ca-certificates curl less jq gh socat unzip \
  && rm -rf /var/lib/apt/lists/*
 
 # Override at build time with --build-arg CLAUDE_CODE_VERSION=2.x.y to pin a specific
@@ -132,6 +134,16 @@ EOF
 # script via `-e`, never by the user directly. Backgrounded (&) then exec'd past: exec replaces this
 # script's own process image, but the socat children it already forked stay alive as children of
 # whatever ends up as PID 1.
+#
+# It also sources a per-profile init hook, $HOME/.claude/profile.sh, if one exists. That path
+# resolves to <CLAUDE_POD_HOME>/profile.sh on the host (the `claude-pod` script mounts
+# CLAUDE_POD_HOME at /home/claude-pod/.claude), so it's part of the one state dir that already
+# persists across container restarts and is naturally scoped per-profile -- unlike the image
+# itself, nothing here needs a rebuild to take effect. Intended for PATH/env setup for tools a
+# profile installed into that same persistent dir at runtime (e.g. the AWS CLI -- see "Installing
+# extra tools per-instance" in the README) instead of baking them into the shared image. Sourced
+# here, before exec, rather than from a shell rc file, so it applies uniformly to interactive
+# shells and non-interactive `claude-pod claude ...` runs alike.
 RUN cat > /usr/local/bin/claude-pod-entrypoint.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -141,6 +153,8 @@ if [ -n "${HOST_FORWARD_PORTS:-}" ]; then
     socat TCP-LISTEN:"$port",bind=127.0.0.1,fork,reuseaddr TCP:host.docker.internal:"$port" &
   done
 fi
+
+[ -f "$HOME/.claude/profile.sh" ] && . "$HOME/.claude/profile.sh"
 
 exec "$@"
 EOF

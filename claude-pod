@@ -30,6 +30,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   row "  ...specific ports:" "HOST_SERVICES=\"27017 8000\" $HERE/claude-pod (transparent localhost proxy, scoped to just those ports)"
   row "Whitelist MCP servers:" "MCP_SERVERS=codegraph $HERE/claude-pod (default; MCP_SERVERS=none to disable)"
   row "Forward MCP secrets:" "MCP_SERVER_ENV=AGENTMEMORY_SECRET $HERE/claude-pod"
+  row "Forward any env vars:" "ENV_PASSTHROUGH=\"AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY\" $HERE/claude-pod"
   row "Custom config dir:" "CLAUDE_CONFIG_DIR=~/.claude-tessero $HERE/claude-pod (default ~/.claude; same var Claude Code itself uses)"
   row "Custom state dir:" "CLAUDE_POD_HOME=~/.claude-pod-tessero $HERE/claude-pod (default ~/.claude-pod; pair with CLAUDE_CONFIG_DIR for parallel accounts)"
   row "Custom Happy state dir:" "HAPPY_HOME_DIR=~/.happy-pod $HERE/claude-pod (default ~/.happy, shared with any host-side happy; same var Happy itself uses)"
@@ -300,17 +301,19 @@ if command -v jq >/dev/null 2>&1; then
   chmod 600 "$POD_HOME/.claude.json"
 fi
 
-# Optional MCP Server Env Passthrough:
-#   Off by default. MCP_SERVER_ENV="AGENTMEMORY_SECRET" forwards exactly the named host env vars
-#   into the container (bare `-e NAME`, same pass-through style as COLORTERM below) -- for MCP
-#   servers whose config (see MCP_SERVERS above) references them, e.g. agentmemory's
-#   AGENTMEMORY_URL/AGENTMEMORY_SECRET. You name exactly which vars cross into the sandbox; nothing
-#   is inferred from a server's config, so a credential never ends up in the container by surprise.
-if [ -n "${MCP_SERVER_ENV:-}" ]; then
-  for _mcp_env_var in $MCP_SERVER_ENV; do
-    DOCKER_FLAGS+=("-e" "$_mcp_env_var")
-  done
-fi
+# Optional Env Var Passthrough:
+#   Off by default. ENV_PASSTHROUGH="AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY" forwards exactly the
+#   named host env vars into the container (bare `-e NAME`, same pass-through style as COLORTERM
+#   below). You name exactly which vars cross into the sandbox; nothing is inferred or
+#   auto-detected, so a credential never ends up in the container by surprise. General-purpose --
+#   use it for cloud CLI credentials (AWS, gcloud, etc.), a project's API keys, or anything else
+#   instance-specific.
+#   MCP_SERVER_ENV is the same mechanism, kept as a separate name for the MCP-server-secret case
+#   specifically (e.g. MCP_SERVER_ENV="AGENTMEMORY_URL AGENTMEMORY_SECRET" for a server whitelisted
+#   via MCP_SERVERS above). Set either or both; they combine rather than override each other.
+for _passthrough_var in ${ENV_PASSTHROUGH:-} ${MCP_SERVER_ENV:-}; do
+  DOCKER_FLAGS+=("-e" "$_passthrough_var")
+done
 
 # Hardening:
 #   --cap-drop=ALL                       Drop all Linux capabilities. An interactive dev shell
