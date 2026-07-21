@@ -125,6 +125,12 @@ the host) and the pod's own `~/.claude` and `~/.happy` state are visible. Other 
 paths and other projects are not reachable. If the run was started with `NET=none`,
 there is no network at all -- not even to api.anthropic.com -- so that mode is for
 offline shell/build work, not a live Claude session.
+
+## Full options
+This sandbox's options (`PORTS`, `NET`, `HOST_SERVICES`, `MEMORY`/`CPUS`/`PIDS`,
+`MCP_SERVERS`, `ENV_PASSTHROUGH`/`MCP_SERVER_ENV`, `CLAUDE_CONFIG_DIR`, etc.) are set
+by whoever launched this container, not from inside it -- run `claude-pod --help` on
+the host, or see https://github.com/bmiller59/claude-pod for the full list.
 EOF
 
 # Entrypoint: proxies named host ports onto the container's own loopback before running the real
