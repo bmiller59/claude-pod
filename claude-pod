@@ -243,6 +243,16 @@ for _claude_home_item in "${CLAUDE_HOME_ITEMS[@]}"; do
 done
 [ -e "$HOME/.agents" ] && DOCKER_FLAGS+=("-v" "$HOME/.agents:/home/claude-pod/.agents:ro")
 
+# Plugins get a second bind mount at their own literal host path (in addition to the
+# /home/claude-pod/.claude/plugins mount above). Claude Code's plugin manifests
+# (installed_plugins.json, known_marketplaces.json) record each plugin/marketplace's
+# *absolute* install path on the host (e.g. /home/brendan/.claude/plugins/cache/...).
+# The container's $HOME is /home/claude-pod, not the host user's home, so without this
+# second mount those recorded paths point nowhere inside the container and Claude Code
+# silently fails to load the plugin, even though its files are present under the
+# container-native path.
+[ -e "$CLAUDE_SRC_DIR/plugins" ] && DOCKER_FLAGS+=("-v" "$CLAUDE_SRC_DIR/plugins:$CLAUDE_SRC_DIR/plugins:ro")
+
 # Optional MCP Server Whitelist:
 #   Defaults to "codegraph" -- this fork's one personal default (see CLAUDE.md), since it's used
 #   constantly here. Override with MCP_SERVERS="codegraph agentmemory" (replaces the default
