@@ -140,7 +140,12 @@ loginctl enable-linger $USER   # once, ever, per user
 ```
 Write one unit per account from the template, using each account's own
 Step 0 choice — include `--dangerously-skip-permissions` in `ExecStart`
-only for accounts that opted into bypass mode. `daemon-reload`, then
+only for accounts that opted into bypass mode, but always include
+`--continue` regardless of that choice: without it, every restart (an
+in-app `/exit`, a crash, a manual `systemctl restart` for an image/config
+update) starts a brand-new conversation instead of resuming the one that
+was running, which reads as "I lost my session" even though the container
+and account are both fine. `daemon-reload`, then
 `systemctl --user enable --now happy@<id>` **one account at a time** —
 confirm each is stable (`NRestarts` not climbing) before starting the next.
 For a manual-approval account, also confirm during this step that

@@ -95,7 +95,7 @@ Environment=CLAUDE_CONFIG_DIR=%h/.claude-<id>
 Environment=CLAUDE_POD_HOME=%h/.claude-pod-<id>
 Environment=HAPPY_HOME_DIR=%h/.happy-<id>
 Environment=HAPPY_MACHINE_NAME=<id>
-ExecStart=/usr/bin/script -qec "%h/path/to/claude-pod happy" /dev/null
+ExecStart=/usr/bin/script -qec "%h/path/to/claude-pod happy --continue" /dev/null
 ExecStop=-/usr/bin/docker stop <id>
 Restart=always
 RestartSec=5
@@ -185,12 +185,19 @@ a separate view), `/exit` ends that session for the phone too, not just
 locally. What happens next follows directly from `Restart=always` having
 no `RestartPreventExitStatus` configured: it restarts on any exit, clean
 or crashed, so the account comes back on its own in ~5-10s (same recovery
-path as the crash-kill test in 7.8) — but it's a *new* session, not a
-resume of the one that was just ended, since `ExecStart` doesn't pass
-`--resume`. This specific path (a clean in-app `/exit`, as opposed to an
-external `docker kill`) was reasoned through from systemd's documented
-semantics, not independently exercised the way 7.8 was — if it matters,
-verify it for real rather than trust this note alone.
+path as the crash-kill test in 7.8) — and since `ExecStart` now includes
+`--continue` (Happy forwards it straight to Claude, which resolves it to
+`claude --resume <session-id>` for that account's most recent conversation
+in that directory — confirmed via `docker top <id>` showing the resolved
+flag on the actual `claude.exe` process after a restart), it comes back
+into the *same* conversation, not a blank one. This still means any
+in-flight shell state (an open subshell, an unfinished long-running
+command) is lost — the whole container is torn down and recreated on any
+restart, not just Claude's conversation — only the Claude-side transcript
+survives, via `--continue` and the persisted `CLAUDE_POD_HOME`. Verify
+`--continue` resolves correctly after any change here: a fresh conversation
+with no prior history in that directory should still start cleanly (not
+error) rather than fail because there's nothing yet to continue.
 
 **A fourth way people get tripped up: attaching from inside an IDE's
 integrated terminal (VS Code confirmed).** `Ctrl+Q` was caught by VS Code
