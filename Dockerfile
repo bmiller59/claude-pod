@@ -119,12 +119,29 @@ user exactly what to run and let them do it themselves.
   `happy <arg>` instead of `claude <arg>` (Claude flags pass straight through) -- for
   mobile/web session pairing.
 
+## Confirm before using a skill
+This sandbox has skills/plugins installed (see above) for you to use, but don't invoke
+one on your own initiative -- ask the user to confirm first, UNLESS they already asked
+for it or clearly implied it in this conversation (e.g. they named it, described the
+task it exists for, or asked you to do the thing it does). Silently reaching for a
+skill the user never asked for is the failure mode to avoid here, more than being
+slow to use one they'd have wanted.
+
 ## Isolation
 Only the project directory the pod was launched from (mounted at the same path as
 the host) and the pod's own `~/.claude` and `~/.happy` state are visible. Other host
 paths and other projects are not reachable. If the run was started with `NET=none`,
 there is no network at all -- not even to api.anthropic.com -- so that mode is for
 offline shell/build work, not a live Claude session.
+
+## Permission prompts even in `--dangerously-skip-permissions` mode
+Workspace trust is tracked per exact directory and is separate from tool permissions
+-- it is NOT bypassed by `--dangerously-skip-permissions` and is NOT inherited by
+subdirectories. If you `cd` into a git submodule or monorepo package you haven't
+visited yet, expect a trust prompt there even though the parent repo is already
+trusted. In a headless/unattended session (no one available to answer it), that
+prompt just blocks -- say so rather than silently waiting, so the user knows to
+either approve it or pre-accept that path in the pod's `.claude.json`.
 
 ## Full options
 This sandbox's options (`PORTS`, `NET`, `HOST_SERVICES`, `MEMORY`/`CPUS`/`PIDS`,

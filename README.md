@@ -51,8 +51,10 @@ Docker is the only requirement — no Node.js, npm, or `claude` needed on your h
   - [Aliases](#aliases)
   - [Running Happy Coder](#running-happy-coder)
   - [First launch (login)](#first-launch-login)
+  - [Permission prompts that survive `--dangerously-skip-permissions`](#permission-prompts-that-survive---dangerously-skip-permissions)
   - [Exposing ports](#exposing-ports)
   - [Claude config access](#claude-config-access)
+  - [Installing skills and plugins](#installing-skills-and-plugins)
   - [Multiple accounts / profiles](#multiple-accounts--profiles)
   - [Reaching host services](#reaching-host-services)
   - [MCP servers](#mcp-servers)
@@ -132,6 +134,17 @@ Because the default isn't pod-exclusive, `uninstall.sh` deliberately does **not*
 
 The first time you start Claude inside the pod, it will print a login URL. Open it in your host browser, complete the login, paste the verification code back into the container, and you're done. The session persists in `~/.claude-pod/` (or `CLAUDE_POD_HOME` if set — see [Multiple accounts / profiles](#multiple-accounts--profiles)) and survives container restarts — you only do this once per machine (per state dir).
 
+### Permission prompts that survive `--dangerously-skip-permissions`
+
+`--dangerously-skip-permissions` bypasses Claude Code's tool-permission system, but a few other confirmation gates sit outside that system entirely and are **not** suppressed by it — worth knowing about, since a headless pod (a `happy@*` systemd service, say) has no one at the keyboard to answer them:
+
+- **Workspace trust, per directory.** Claude Code tracks "do you trust this folder" separately from tool permissions, keyed by the exact working directory — recorded per-path in the pod's own `.claude.json` (`$POD_HOME/.claude.json`, bind-mounted and writable, so acceptance does persist across container restarts once given). The trap: trust is **not** inherited by subdirectories. If the agent `cd`s into a git submodule or a monorepo package it hasn't visited before, that path gets its own untrusted entry and blocks until someone accepts it — even though the parent repo is already trusted and the session is running fully bypassed otherwise. Fix a stuck one by hand: set `"hasTrustDialogAccepted": true` for that path's entry under `"projects"` in `$POD_HOME/.claude.json`.
+- **The `skipDangerousModePermissionPrompt` first-run dialog.** The very first time bypass mode is used, Claude Code normally shows a one-time "I accept the risk" confirmation; a background/headless run has no way to answer it. Set `"skipDangerousModePermissionPrompt": true` in the profile's `settings.json` ahead of time to pre-accept it — needed for any account that will run non-interactively (systemd, CI, etc.) before its first launch.
+- **Explicit `ask` rules and `requiresUserInteraction` MCP tools.** A `permissions.ask` entry in `settings.json`, or an MCP tool whose definition sets `_meta["anthropic/requiresUserInteraction"]`, forces a prompt regardless of permission mode. Not an issue unless you've added one yourself or an MCP server declares it.
+- **The `rm -rf /` / `rm -rf ~` circuit breaker.** Always prompts, by design, with no override — including when the destructive command is hidden behind `$(...)`/backtick/`<(...)` substitution. This one can't be pre-accepted and isn't meant to be.
+
+None of this is `claude-pod`-specific — it's how Claude Code's permission modes work in general — but it matters more here because these pods are routinely run unattended.
+
 ### Exposing ports
 
 By default, `claude-pod` doesn't publish any ports to the host (outbound traffic is still unrestricted — see [What is and isn't isolated](#what-is-and-isnt-isolated)). Map ports through with the `PORTS` environment variable:
@@ -179,6 +192,28 @@ If your `settings.json` references a hook or `statusLine.command` pointing somew
 
 The source directory for all of this defaults to `~/.claude` but is overridable with `CLAUDE_CONFIG_DIR` — see [Multiple accounts / profiles](#multiple-accounts--profiles) below. `~/.agents` is the one exception: it's always read from `$HOME/.agents` regardless, since it's a skill-manager symlink target unrelated to which Claude account is active.
 
+### Installing skills and plugins
+
+`claude-pod` never installs anything into `~/.claude/` itself — it only mounts what's already there (see [Claude config access](#claude-config-access) above), so a new plugin has to be installed with the host's own `claude` CLI, not from inside the pod:
+
+```sh
+claude plugin marketplace add <owner>/<repo>
+claude plugin install <plugin>@<marketplace>
+```
+
+For the default profile (no `CLAUDE_CONFIG_DIR`), that's the whole story — install normally on the host and it shows up inside the pod on the next run, no extra step, since it's the same `~/.claude/plugins` either way.
+
+**If you're running [multiple profiles](#multiple-accounts--profiles), install separately into each one.** Each `CLAUDE_CONFIG_DIR` is a fully independent Claude account with its own plugin manifest — installing a plugin under the default `~/.claude` does *not* make it visible to a `CLAUDE_CONFIG_DIR=~/.claude-tessero` pod, even though both are mounted by the same `claude-pod` script. Point `CLAUDE_CONFIG_DIR` at the profile you're adding it to:
+
+```sh
+CLAUDE_CONFIG_DIR=~/.claude-tessero claude plugin marketplace add obra/superpowers-marketplace
+CLAUDE_CONFIG_DIR=~/.claude-tessero claude plugin install superpowers@superpowers-marketplace
+```
+
+Repeat per profile. Personal skills (`~/.claude/skills/*`, not installed via the plugin marketplace) work the same way — they have to actually exist under each profile's own config dir to be mounted there.
+
+If the profile is a running `happy@*` systemd service (see [`multi-account-happy-setup`](.claude/skills/multi-account-happy-setup/SKILL.md)), the plugin mount is only evaluated when the container starts, so restart that service after installing — `systemctl --user restart happy@tessero.service` — or it won't pick up the new plugin until its next natural restart.
+
 ### Multiple accounts / profiles
 
 If you use more than one Claude account — say, separate `~/.claude-tessero` and `~/.claude-nextspace` config directories on your host, switched between via `claude`'s own `CLAUDE_CONFIG_DIR` env var — `claude-pod` recognizes the same variable:
@@ -197,6 +232,15 @@ CLAUDE_CONFIG_DIR=~/.claude-nextspace CLAUDE_POD_HOME=~/.claude-pod-nextspace cl
 ```
 
 The two variables are independent — nothing derives one from the other — but naming `CLAUDE_POD_HOME` with the same suffix as `CLAUDE_CONFIG_DIR` (as above) keeps profiles easy to tell apart. Each `CLAUDE_POD_HOME` gets its own auth token and session history, so the two pods above can run concurrently, fully logged into different Claude accounts, without interfering with each other.
+
+Typing both variables out every time gets old fast — fold each profile into its own alias instead, one per profile, in your shell configuration file:
+
+```sh
+alias claude-pod-tessero='CLAUDE_CONFIG_DIR=~/.claude-tessero CLAUDE_POD_HOME=~/.claude-pod-tessero ~/tools/claude-pod/claude-pod claude --dangerously-skip-permissions'
+alias claude-pod-nextspace='CLAUDE_CONFIG_DIR=~/.claude-nextspace CLAUDE_POD_HOME=~/.claude-pod-nextspace ~/tools/claude-pod/claude-pod claude --dangerously-skip-permissions'
+```
+
+Each is the shell-through-to-Claude form (see [Aliases](#aliases) above) rather than the shell-first form, so running `claude-pod-tessero` drops straight into that profile's Claude session. Swap in `happy` for `claude` in the alias if you'd rather land in [Happy Coder](#running-happy-coder) for that profile instead.
 
 > **Want several accounts each reachable from the Happy Coder mobile app, kept running persistently by systemd instead of one-off foreground commands?** See the [`multi-account-happy-setup`](.claude/skills/multi-account-happy-setup/SKILL.md) skill — it walks an agent through the full setup (directory layout, the MCP-whitelist and bypass-permissions gotchas that only surface on first run, the `HAPPY_HOME_DIR`/`HAPPY_MACHINE_NAME` pairing, the systemd unit template, and the recommended test suite) for as many accounts as you name.
 
