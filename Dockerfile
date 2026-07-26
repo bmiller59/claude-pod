@@ -31,6 +31,13 @@ RUN npm install -g @colbymchenry/codegraph
 # flags straight through. See the claude-pod script's HAPPY_HOME_DIR handling for its state dir.
 RUN npm install -g happy-coder
 
+# The three `npm install -g` calls above ran as root, so /usr/local/lib/node_modules and
+# /usr/local/bin are root-owned. The container actually runs as a dynamic, unfixed uid/gid (see
+# below), which can't write there -- so Claude Code's own self-updater (and `npm update -g` for
+# codegraph/happy-coder) fails with permission denied. Same fix as the nvm dir further down:
+# make the install locations world-writable so any runtime uid can update in place.
+RUN chmod -R 777 /usr/local/lib/node_modules /usr/local/bin
+
 # We DO NOT use `USER node` here. Instead, we pass `--user "$(id -u):$(id -g)"` dynamically
 # at runtime in the `claude-pod` script. This ensures perfect file permission alignment
 # between the host and the container, especially on Linux environments.

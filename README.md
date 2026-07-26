@@ -145,6 +145,8 @@ The first time you start Claude inside the pod, it will print a login URL. Open 
 
 None of this is `claude-pod`-specific — it's how Claude Code's permission modes work in general — but it matters more here because these pods are routinely run unattended.
 
+**A starter `permissions.allow` list is seeded into each of the 4 profile `settings.json` files** (`~/.claude-seas`, `-nextspace`, `-tessero`, `-tessero-bam`) — the `codegraph` MCP tools plus common read-only/low-risk commands (`git diff`/`status`/`log`/`show`, `ls`, `grep`, `find`, `cat`, `npm`/`npx`/`yarn` test-and-lint scripts, `curl -s`, read-only `gh` lookups, `WebSearch`/`WebFetch`). This doesn't change what bypass mode already allows — it's a defense-in-depth measure in case a session ever isn't fully bypassed, or a future Claude Code version narrows what bypass mode covers. It does **not** help with any of the gates above (workspace trust, the circuit breaker) — those aren't allow-list-shaped problems. Edit `permissions.allow` directly in a profile's `settings.json` to extend it; see [Claude Code's permission-rule syntax](https://code.claude.com/docs/en/permissions) for the `Tool(pattern)` format.
+
 ### Exposing ports
 
 By default, `claude-pod` doesn't publish any ports to the host (outbound traffic is still unrestricted — see [What is and isn't isolated](#what-is-and-isnt-isolated)). Map ports through with the `PORTS` environment variable:

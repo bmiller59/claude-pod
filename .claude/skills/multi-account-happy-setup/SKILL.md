@@ -86,6 +86,13 @@ Two failures only show up on first run and both are avoidable up front:
    `"skipDangerousModePermissionPrompt": true` to each such account's
    `~/.claude-<id>/settings.json`. Skip this for accounts set up with
    manual approval instead — there's no bypass-mode dialog to suppress.
+3. **Starter `permissions.allow` list**: seed `~/.claude-<id>/settings.json`
+   with the same broad `permissions.allow` list used by the other profiles
+   (see [Permission prompts that survive `--dangerously-skip-permissions`
+   in the README](../../../README.md#permission-prompts-that-survive---dangerously-skip-permissions))
+   — the `codegraph` MCP tools plus common read-only/low-risk Bash
+   patterns. Defense-in-depth, not required for bypass mode to work, but
+   cheap to seed up front rather than add later per-account.
 
 ## Step 4: First run per account — manual, interactive, one at a time
 
