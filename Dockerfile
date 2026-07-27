@@ -150,11 +150,60 @@ trusted. In a headless/unattended session (no one available to answer it), that
 prompt just blocks -- say so rather than silently waiting, so the user knows to
 either approve it or pre-accept that path in the pod's `.claude.json`.
 
+Two mitigations already run automatically, so this should be rare in practice:
+`claude-pod` itself pre-seeds trust for every git repo found under the launch
+directory before the container even starts, and a managed `PostToolUse` hook
+(baked into this image, see `managed-settings.json`) auto-trusts any new worktree
+right after a `git worktree add` command runs. A prompt can still surface for a
+brand-new sibling repo (e.g. a fresh `git clone`) created mid-session -- that
+case isn't covered yet.
+
 ## Full options
 This sandbox's options (`PORTS`, `NET`, `HOST_SERVICES`, `MEMORY`/`CPUS`/`PIDS`,
 `MCP_SERVERS`, `ENV_PASSTHROUGH`/`MCP_SERVER_ENV`, `CLAUDE_CONFIG_DIR`, etc.) are set
 by whoever launched this container, not from inside it -- run `claude-pod --help` on
 the host, or see https://github.com/bmiller59/claude-pod for the full list.
+EOF
+
+# Managed-policy settings.json, alongside the managed CLAUDE.md above: loaded from the same fixed
+# system path on Linux, with the highest precedence of any settings scope, so it applies to every
+# profile/account this image ever runs -- no per-profile settings.json edit needed on the host (and
+# unlike a profile's own settings.json, which claude-pod bind-mounts read-only, there's nowhere for
+# a user to even make that edit from inside the sandbox).
+#
+# The one hook here plugs the gap the launch-time trust pre-seeding (see the `claude-pod` script's
+# "Workspace-Trust Pre-Seeding" block) can't reach: a directory created *after* the container has
+# already started, most commonly `git worktree add` for a feature branch. Without this, the first
+# command that touches the new worktree hits Claude Code's per-directory trust dialog -- fine
+# interactively, but indistinguishable from a hang in a headless `happy@*` systemd pod.
+#
+# Runs as a PostToolUse hook (after the worktree already exists) rather than trying to intercept or
+# reproduce `git worktree add` itself -- deliberately not a WorktreeCreate hook, which is a
+# *provider* hook (it must create the worktree and print its path, replacing git's own behavior, and
+# only fires for Claude's own `--worktree`/background-session worktrees anyway, not a plain
+# `git worktree add` run via the Bash tool, which is how this actually gets invoked in practice).
+# `git worktree list --porcelain` is asked for the ground truth afterward instead of parsing the
+# triggering command's arguments, so it isn't thrown off by `-b`, `--detach`, or any other flag
+# ordering. Same silent-auto-approve tradeoff as the launch-time scan (see README) -- there's no
+# reasonable way to run an interactive y/N prompt from inside a hook anyway.
+RUN mkdir -p /etc/claude-code && cat > /etc/claude-code/managed-settings.json <<'EOF'
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git worktree add *)",
+            "command": "repo_cwd=$(jq -r '.cwd'); git -C \"$repo_cwd\" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2}' | while read -r wt; do jq --arg p \"$wt\" '.projects[$p] = ((.projects[$p] // {}) + {\"hasTrustDialogAccepted\": true})' /home/claude-pod/.claude.json > /home/claude-pod/.claude.json.tmp 2>/dev/null && mv /home/claude-pod/.claude.json.tmp /home/claude-pod/.claude.json; done",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
 EOF
 
 # Entrypoint: proxies named host ports onto the container's own loopback before running the real

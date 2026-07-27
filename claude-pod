@@ -34,6 +34,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   row "Custom config dir:" "CLAUDE_CONFIG_DIR=~/.claude-tessero $HERE/claude-pod (default ~/.claude; same var Claude Code itself uses)"
   row "Custom state dir:" "CLAUDE_POD_HOME=~/.claude-pod-tessero $HERE/claude-pod (default ~/.claude-pod; pair with CLAUDE_CONFIG_DIR for parallel accounts)"
   row "Custom Happy state dir:" "HAPPY_HOME_DIR=~/.happy-pod $HERE/claude-pod (default ~/.happy, shared with any host-side happy; same var Happy itself uses)"
+  row "Prompt before trusting subdirs:" "TRUST_PROMPT=1 $HERE/claude-pod (interactive y/N per git repo found under \$PWD; default: auto-approve all of them, no prompt)"
   printf '\n'
   row "Shortcut alias:" "alias claude-pod=$HERE/claude-pod"
   row "Full README:"    "https://github.com/bmiller59/claude-pod"
@@ -76,6 +77,48 @@ mkdir -p "$POD_HOME"
 # ~/.ssh, ~/.aws, ~/.gnupg.
 chmod 700 "$POD_HOME"
 chmod 600 "$POD_HOME/.claude.json"
+
+# Optional Workspace-Trust Pre-Seeding:
+#   Claude Code tracks "do you trust this folder" per exact working directory inside .claude.json,
+#   with NO inheritance to subdirectories -- cd-ing into a git submodule or a sibling repo under
+#   this mount that Claude hasn't visited before re-triggers the trust dialog, even though the
+#   parent directory (this mount root) is already trusted and the rest of the session is fully
+#   bypassed. That's a real problem for a long-running pod (e.g. a systemd `happy@*` service)
+#   rooted at a parent directory spanning several repos: there's no one at the keyboard to answer
+#   a prompt that shows up mid-session after a `cd`.
+#
+#   Privacy/security tradeoff, deliberately chosen: by default we auto-approve trust for every git
+#   repo root found under $PWD, with no prompt. Reasoning: claude-pod's real trust boundary is the
+#   Docker mount itself -- only $PWD and what's under it is visible inside the container at all
+#   (see README's "What is and isn't isolated"). A second, per-subdirectory trust gate for
+#   something Claude can already read and execute inside that same mount doesn't add real
+#   isolation, only friction -- friction a headless pod has no way to answer anyway. If you'd
+#   rather eyeball each repo (e.g. a parent directory whose contents you don't fully control),
+#   set TRUST_PROMPT=1 for an interactive y/N per repo instead of silent auto-approval. Skipped
+#   (with a warning, not a hang) when stdin isn't a terminal, since nothing could answer it there.
+#   Only runs when jq is available, consistent with the MCP_SERVERS handling below.
+if command -v jq >/dev/null 2>&1; then
+  TRUST_SCAN_DEPTH=6
+  while IFS= read -r -u3 _git_marker; do
+    _repo_root="$(dirname "$_git_marker")"
+    _already_trusted="$(jq -r --arg p "$_repo_root" '.projects[$p].hasTrustDialogAccepted // false' "$POD_HOME/.claude.json")"
+    [ "$_already_trusted" = "true" ] && continue
+
+    if [ "${TRUST_PROMPT:-}" = "1" ]; then
+      if [ -t 0 ]; then
+        read -r -p "Pre-approve trust for $_repo_root? [y/N] " _trust_ans
+        [[ "$_trust_ans" =~ ^[Yy]$ ]] || continue
+      else
+        err "TRUST_PROMPT=1 but stdin isn't a terminal -- skipping trust prompt for $_repo_root (it'll hit Claude Code's own trust dialog instead)."
+        continue
+      fi
+    fi
+
+    jq --arg p "$_repo_root" '.projects[$p] = ((.projects[$p] // {}) + {"hasTrustDialogAccepted": true})' \
+      "$POD_HOME/.claude.json" > "$POD_HOME/.claude.json.tmp" && mv "$POD_HOME/.claude.json.tmp" "$POD_HOME/.claude.json"
+    chmod 600 "$POD_HOME/.claude.json"
+  done 3< <(find "$PWD" -maxdepth "$TRUST_SCAN_DEPTH" \( -name node_modules -o -name vendor -o -name .venv \) -prune -o -name .git -print 2>/dev/null)
+fi
 
 # Happy Coder CLI (https://happy.engineering) is baked into the image as an optional way to run
 # Claude -- `claude-pod happy --dangerously-skip-permissions` instead of `claude-pod
