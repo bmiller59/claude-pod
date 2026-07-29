@@ -189,8 +189,15 @@ By default, `claude-pod` bind-mounts a curated, **read-only** subset of your hos
 - `~/.claude/plugins` — installed marketplace plugins (e.g. `superpowers`).
 - `~/.claude/CLAUDE.md` — your global instructions.
 - `~/.claude/settings.json` and `~/.claude/statusline.sh` — model/permissions/statusline config.
+- `~/.claude/profile-tag` — optional; see [Multiple accounts / profiles](#multiple-accounts--profiles).
 
 Each of these is mounted only if it exists on your host, and only read-only — Claude can see them but can never write back, install a new plugin, or edit your global `CLAUDE.md` from inside the pod.
+
+Don't have a `statusline.sh` yet? [`docs/statusline.sh`](docs/statusline.sh) is a copy-pasteable reference implementation — pod/host indicator, repo/branch, model, context-window and rate-limit usage, and (if you use [multiple profiles](#multiple-accounts--profiles)) a profile letter. Save it as `~/.claude/statusline.sh` (`chmod +x`) and point `settings.json` at it:
+
+```json
+"statusLine": { "type": "command", "command": "~/.claude/statusline.sh", "padding": 0 }
+```
 
 This is deliberately **not** the whole `~/.claude/` directory: your `.credentials.json`, `history.jsonl`, and `projects/` (session transcripts from every other project you've used Claude Code on) are never mounted, so "other projects are unreachable" ([What is and isn't isolated](#what-is-and-isnt-isolated)) still holds.
 
@@ -249,6 +256,15 @@ alias claude-pod-nextspace='CLAUDE_CONFIG_DIR=~/.claude-nextspace CLAUDE_POD_HOM
 ```
 
 Each is the shell-through-to-Claude form (see [Aliases](#aliases) above) rather than the shell-first form, so running `claude-pod-tessero` drops straight into that profile's Claude session. Swap in `happy` for `claude` in the alias if you'd rather land in [Happy Coder](#running-happy-coder) for that profile instead.
+
+**Telling profiles apart in the statusline.** [`docs/statusline.sh`](docs/statusline.sh) shows a profile letter derived from `CLAUDE_CONFIG_DIR`'s basename (e.g. `~/.claude-tessero` → `t`) — but `CLAUDE_CONFIG_DIR` itself isn't forwarded into the container, so that derivation only works on the host. Inside a pod, drop a one-line `profile-tag` file next to each profile's `statusline.sh` instead — `claude-pod` bind-mounts it the same way (see [Claude config access](#claude-config-access)) and the script prefers it when present:
+
+```sh
+echo -n t > ~/.claude-tessero/profile-tag
+echo -n n > ~/.claude-nextspace/profile-tag
+```
+
+If `~/.claude-tessero/statusline.sh` is a symlink to your main `~/.claude/statusline.sh` (recommended, so a script update doesn't need copying to every profile), this is the only per-profile file you need to maintain by hand.
 
 > **Want several accounts each reachable from the Happy Coder mobile app, kept running persistently by systemd instead of one-off foreground commands?** See the [`multi-account-happy-setup`](.claude/skills/multi-account-happy-setup/SKILL.md) skill — it walks an agent through the full setup (directory layout, the MCP-whitelist and bypass-permissions gotchas that only surface on first run, the `HAPPY_HOME_DIR`/`HAPPY_MACHINE_NAME` pairing, the systemd unit template, and the recommended test suite) for as many accounts as you name.
 

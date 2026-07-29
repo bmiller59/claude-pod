@@ -272,6 +272,9 @@ DOCKER_FLAGS+=("--pids-limit=${PIDS:-4096}")
 #   accounts on the host (e.g. CLAUDE_CONFIG_DIR=~/.claude-tessero), the same value works here.
 #   ~/.agents is NOT part of this override: it's a skill-manager symlink target unrelated to which
 #   Claude account/profile is active, so it always comes from $HOME regardless of CLAUDE_CONFIG_DIR.
+#   profile-tag is an optional one-line file (e.g. "s" in ~/.claude-seas/profile-tag) that
+#   statusline.sh reads to label which profile a pod is running as -- CLAUDE_CONFIG_DIR itself
+#   isn't forwarded into the container, so the statusline can't derive that from the env there.
 #   Each path is mounted only if it exists on the host. This matters, not just tidiness: Docker's
 #   bind mount auto-creates the *target* path when the *source* is missing, and since source and
 #   target share the same relative path here, an unconditional mount would silently create an
@@ -280,7 +283,7 @@ DOCKER_FLAGS+=("--pids-limit=${PIDS:-4096}")
 #   does.
 CLAUDE_SRC_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] && [ ! -d "$CLAUDE_CONFIG_DIR" ] && die "CLAUDE_CONFIG_DIR '$CLAUDE_CONFIG_DIR' does not exist or is not a directory."
-CLAUDE_HOME_ITEMS=(skills plugins CLAUDE.md settings.json statusline.sh)
+CLAUDE_HOME_ITEMS=(skills plugins CLAUDE.md settings.json statusline.sh profile-tag)
 for _claude_home_item in "${CLAUDE_HOME_ITEMS[@]}"; do
   [ -e "$CLAUDE_SRC_DIR/$_claude_home_item" ] && DOCKER_FLAGS+=("-v" "$CLAUDE_SRC_DIR/$_claude_home_item:/home/claude-pod/.claude/$_claude_home_item:ro")
 done
